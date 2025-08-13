@@ -7,7 +7,6 @@ export default defineConfig({
   base: './',
   build: {
     rollupOptions: {
-      external: ["/gzip_zopfli_worker.mjs"], // 明示的に外部モジュールとして指定
       output: {
         inlineDynamicImports: true, // 動的importをインライン化
         manualChunks: undefined

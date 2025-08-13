@@ -8,13 +8,24 @@ type ZopfliFn = (input: Uint8Array, numIterations?: number) => Promise<Uint8Arra
 let _zopfliFn: ZopfliFn | null = null;
 async function getZopfli(): Promise<ZopfliFn> {
   if (_zopfliFn) return _zopfliFn;
-  // public/ 配下に置いたモジュールを生URLで読み込む（Viteは @vite-ignore 付きdynamic import可）
-  const mod: any = await import(/* @vite-ignore */ "/gzip_zopfli_worker.mjs");
-  if (!mod || typeof mod.zopfli !== "function") {
-    throw new Error("zopfli_worker.mjs の読み込みに失敗（zopfliが見つかりません）");
+  try {
+    // 現在のスクリプトURLからベースパスを取得し、それを基にパスを組み立て
+    const scriptUrl = new URL(import.meta.url);
+    const base = scriptUrl.pathname.substring(0, scriptUrl.pathname.lastIndexOf('/') + 1);
+    const path = base === './' ? '/gzip_zopfli_worker.mjs' : `${base}gzip_zopfli_worker.mjs`;
+    console.log(`Trying to load worker from: ${path}`);
+    
+    const mod: any = await import(/* @vite-ignore */ path);
+    if (!mod || typeof mod.zopfli !== "function") {
+      throw new Error("zopfli_worker.mjs の読み込みに失敗（zopfliが見つかりません）");
+    }
+    
+    _zopfliFn = mod.zopfli as ZopfliFn;
+    return _zopfliFn!;
+  } catch (e) {
+    console.error("zopfli_worker.mjs のロードに失敗:", e);
+    throw new Error(`zopfli_worker.mjs の読み込みに失敗: ${e.message}`);
   }
-  _zopfliFn = mod.zopfli as ZopfliFn;
-  return _zopfliFn!;
 }
 
 /* ============================== helpers ============================== */
