@@ -11,23 +11,20 @@ async function getZopfli(): Promise<ZopfliFn> {
   try {
     // 現在のスクリプトURLからベースパスを取得し、それを基にパスを組み立て
     const scriptUrl = new URL(import.meta.url);
-    let base = scriptUrl.pathname.substring(0, scriptUrl.pathname.lastIndexOf('/') + 1);
+    let base = "/";
     if (scriptUrl.host.endsWith("github.io")) {
       base = scriptUrl.pathname.split('/').slice(0, 2).join('/') + '/';
     }
-    const path = base === './' ? '/gzip_zopfli_worker.mjs' : `${base}gzip_zopfli_worker.mjs`;
-    console.log(`Trying to load worker from: ${path}`);
-    
-    const mod: any = await import(/* @vite-ignore */ path);
+    // プロジェクトに置いた Worker ラッパ（GZIPを返す想定）
+    const mod: any = await import(`${base}gzip_zopfli_worker.mjs`);
     if (!mod || typeof mod.zopfli !== "function") {
       throw new Error("zopfli_worker.mjs の読み込みに失敗（zopfliが見つかりません）");
     }
-    
     _zopfliFn = mod.zopfli as ZopfliFn;
     return _zopfliFn!;
-  } catch (e) {
+  } catch (e: any) {
     console.error("zopfli_worker.mjs のロードに失敗:", e);
-    throw new Error(`zopfli_worker.mjs の読み込みに失敗: ${e.message}`);
+    throw new Error(`zopfli_worker.mjs の読み込みに失敗: ${e.message || e}`);
   }
 }
 
@@ -140,7 +137,7 @@ function parseMaybeZlibHeader(bytes: Uint8Array) {
   return { isZlib: false, start: 0, adlerAt: -1 };
 }
 
-/* ============================== DEFLATE パーサ（既存どおり） ============================== */
+/* ============================== DEFLATE パーサ ============================== */
 type BlockInfo = {
   index: number;
   BFINAL: number;
@@ -290,7 +287,7 @@ function parseDeflate(allBytes: Uint8Array, isRaw = false) {
   return {tokens,blocks,outputBytes,zlib:!isRaw,zlibNote};
 }
 
-/* ============================== 可視化：LITグラデーション（前回のまま） ============================== */
+/* ============================== 可視化：LITグラデーション ============================== */
 const defaultBg = (i: number) => `hsl(${Math.floor((i*137.508)%360)}deg 65% 28% / .45)`;
 function getMaxLitBits(blocks: BlockInfo[]): number {
   let max = 0;
@@ -303,10 +300,29 @@ function getMaxLitBits(blocks: BlockInfo[]): number {
 function litBgFor(bitlen: number, maxBits: number) {
   const denom = Math.max(1, maxBits - 1);
   const t = Math.max(0, Math.min(1, (bitlen - 1) / denom));
-  const hue = 120 - 120 * t;
-  const light = (bitlen % 2 === 0) ? 32 : 26;
+  const hue = 120 - 120 * t;            // 緑(120)→赤(0)
+  const light = (bitlen % 2 === 0) ? 32 : 26; // 偶奇で明度差
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
+
+/** LIT 凡例（ビット長スケール）更新 */
+function updateLitLegend(maxBits: number) {
+  const bar = $("litLegendBar") as HTMLDivElement;
+  const minLab = $("litLegendMin") as HTMLSpanElement;
+  const maxLab = $("litLegendMax") as HTMLSpanElement;
+  // 1..maxBits の各区間に色を割り付けた線形グラデを構成
+  const stops: string[] = [];
+  for (let b = 1; b <= maxBits; b++) {
+    const color = litBgFor(b, maxBits);
+    const p0 = ((b - 1) / maxBits * 100).toFixed(2) + "%";
+    const p1 = (b / maxBits * 100).toFixed(2) + "%";
+    stops.push(`${color} ${p0} ${p1}`);
+  }
+  bar.style.background = `linear-gradient(to right, ${stops.join(", ")})`;
+  minLab.textContent = "1b";
+  maxLab.textContent = `${maxBits}b`;
+}
+
 function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]) {
   container.innerHTML = "";
   const maxLitBits = getMaxLitBits(blocks);
@@ -327,9 +343,11 @@ function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]
       if (j<parts.length-1) container.appendChild(document.createTextNode("\n"));
     });
   }
+  // 凡例（ビット長スケール）も同時に更新
+  updateLitLegend(maxLitBits);
 }
 
-/* ============================== ブロック要約＋“ASCII注釈つき”レンジ表 ============================== */
+/* ============================== ブロック要約＋レンジ表（ASCII注釈） ============================== */
 function escAsciiChar(code: number): string {
   const ch = String.fromCharCode(code);
   if (ch === "\\") return "\\\\";
@@ -339,7 +357,7 @@ function escAsciiChar(code: number): string {
 function asciiAnnotationForRange(a: number, b: number): string {
   const lo = Math.max(0x20, a);
   const hi = Math.min(0x7e, b);
-  if (hi < 0x20 || lo > 0x7e) return ""; // 重なりなし
+  if (hi < 0x20 || lo > 0x7e) return "";
   if (lo === hi) return `'${escAsciiChar(lo)}'`;
   return `'${escAsciiChar(lo)}'–'${escAsciiChar(hi)}'`;
 }
@@ -351,7 +369,6 @@ function rangesWithAscii(nums: number[], annotateForLiteralOnly: boolean) {
   const push = (start: number, end: number) => {
     let base = (start === end) ? `${start}` : `${start}–${end}`;
     if (annotateForLiteralOnly) {
-      // リテラル: 0..255 のうち ASCII 範囲 \x20–\x7e とクロスしたら注釈（端はclamp）
       const loClamp = Math.max(0x20, start);
       const hiClamp = Math.min(0x7e, end);
       if (end >= 0 && start <= 255 && hiClamp >= loClamp) {
@@ -394,7 +411,7 @@ function makeLenTable(title: string, codeLengths?: number[], isLitLen = false) {
     const td1=document.createElement("td"); td1.textContent=String(len);
     const td2=document.createElement("td"); td2.textContent=String(syms.length);
     const td3=document.createElement("td"); td3.className="mono-small wrap";
-    td3.textContent = rangesWithAscii(syms, isLitLen); // ← ASCII注釈
+    td3.textContent = rangesWithAscii(syms, isLitLen);
     tr.append(td1,td2,td3); tbl.appendChild(tr);
   });
   wrap.appendChild(tbl);
@@ -453,7 +470,6 @@ function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: any[]) 
     note.textContent = `tokens ${s.tokens} (lit ${s.lit} / match ${s.match} / raw ${s.raw}), out ${s.outBytes} bytes`;
     card.appendChild(note);
 
-    // 長さごとのシンボル表（Lit/Len は ASCII注釈あり、Dist は注釈なし）
     if (base.trees.litLenCodeLengths) card.appendChild(makeLenTable(s.type==='FIXED'?'Lit/Len (fixed)':'Lit/Len', base.trees.litLenCodeLengths, true));
     if (base.trees.distCodeLengths)   card.appendChild(makeLenTable(s.type==='FIXED'?'Dist (fixed)':'Dist',     base.trees.distCodeLengths, false));
 
@@ -462,8 +478,6 @@ function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: any[]) 
 }
 
 /* ============================== Zopfli 圧縮：Worker 出力(GZIP)→DEFLATE抽出→zlib再パック ============================== */
-
-/** gzipヘッダを読み飛ばし、DEFLATE生ストリーム部分を返す */
 function extractDeflateFromGzip(gz: Uint8Array): Uint8Array {
   if (gz.length < 18) throw new Error("gzipが短すぎます");
   if (gz[0] !== 0x1f || gz[1] !== 0x8b || gz[2] !== 8) throw new Error("gzipヘッダ不正または非DEFLATE");
@@ -483,14 +497,10 @@ function extractDeflateFromGzip(gz: Uint8Array): Uint8Array {
     need(2); off += 2;
   }
   if (off > gz.length - 8) throw new Error("gzipボディが存在しません");
-  // 末尾8バイト（CRC32, ISIZE）は除外
-  return gz.subarray(off, gz.length - 8);
+  return gz.subarray(off, gz.length - 8); // 末尾8バイト（CRC32, ISIZE）除外
 }
-
-/** DEFLATE生ストリームを zlib ラッパに詰め直す（Adler-32は uncompressed のもの） */
 function wrapZlib(deflateRaw: Uint8Array, adler: number): Uint8Array {
-  // 0x78 0x9C は (CMF=0x78, FLG=0x9C) で FCHECK が31整合、32KB窓 & 既定圧縮
-  const zhead = new Uint8Array([0x78, 0x9c]);
+  const zhead = new Uint8Array([0x78, 0x9c]); // 32KB窓 & 既定圧縮（FCHECK整合）
   const tail  = u32beBytes(adler);
   const out = new Uint8Array(2 + deflateRaw.length + 4);
   out.set(zhead, 0);
@@ -498,23 +508,20 @@ function wrapZlib(deflateRaw: Uint8Array, adler: number): Uint8Array {
   out.set(tail, 2 + deflateRaw.length);
   return out;
 }
-
-/** Editorテキスト → Zopfli(Worker) → raw/zlib bytes を返す */
 async function zopfliCompressWithWorker(input: Uint8Array, raw: boolean, numIterations = 10): Promise<Uint8Array> {
   const zopfli = await getZopfli();
-  // Workerは GZIP（DEFLATE）を返す想定
-  const gz = await zopfli(input, numIterations);
+  const gz = await zopfli(input, numIterations); // Worker は GZIP を返す
   const deflateRaw = extractDeflateFromGzip(gz);
   if (raw) return deflateRaw;
   const ad = adler32(input);
   return wrapZlib(deflateRaw, ad);
 }
 
-/* ============================== Ace Editor 初期化（前回のまま） ============================== */
+/* ============================== Ace Editor 初期化（フォントサイズUP） ============================== */
 const editor = ace.edit("editor", {
   mode: "ace/mode/python",
   theme: "ace/theme/monokai",
-  fontSize: "13px",
+  fontSize: "15px",           // ← 少し大きく
   showPrintMargin: false,
   wrap: true,
   useWorker: false
@@ -540,6 +547,10 @@ const errDiv = $("error") as HTMLSpanElement;
 const okDiv = $("success") as HTMLSpanElement;
 const paneIO = $("pane-io") as HTMLDivElement;
 
+/* 追加: numIterations スライダー */
+const elIter = $("iter") as HTMLInputElement;
+const elIterVal = $("iterVal") as HTMLSpanElement;
+
 const setErr = (m: string) => { errDiv.textContent = m; errDiv.classList.remove("hidden"); okDiv.classList.add("hidden"); };
 const setOk  = (m: string) => { okDiv .textContent = m; okDiv .classList.remove("hidden"); errDiv.classList.add("hidden"); };
 const clearMsgs=()=>{ errDiv.classList.add("hidden"); errDiv.textContent=''; okDiv.classList.add("hidden"); okDiv.textContent=''; };
@@ -552,8 +563,9 @@ async function compressFromEditorAndVisualize() {
     const text = editor.getValue();
     const input = enc.encode(text);
     const raw = elRaw.checked;
+    const iters = Math.max(1, Math.min(1000, parseInt(elIter.value || "10", 10) || 10));
 
-    const comp = await zopfliCompressWithWorker(input, raw, 10);
+    const comp = await zopfliCompressWithWorker(input, raw, iters);
     elHex.value = bytesToHex(comp);
     elB64.value = b64enc(comp);
 
@@ -570,9 +582,13 @@ async function compressFromEditorAndVisualize() {
 }
 const debounceCompress = ()=>{ if (compressTimer) clearTimeout(compressTimer); compressTimer = window.setTimeout(compressFromEditorAndVisualize, 300); };
 
-/* エディタ変更/トグル変更で再圧縮 */
+/* エディタ変更/トグル変更/イテレーション変更で再圧縮 */
 (editor.session as any).on("change", debounceCompress);
 elRaw.addEventListener("change", debounceCompress);
+elIter.addEventListener("input", ()=>{
+  elIterVal.textContent = String(elIter.value);
+  debounceCompress();
+});
 
 /* ============================== 入力→解析（既存どおり） ============================== */
 $("btn-parse")!.addEventListener("click", ()=>{
@@ -593,7 +609,7 @@ $("btn-parse")!.addEventListener("click", ()=>{
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 });
 
-/* ============================== サンプル/クリア（既存どおり） ============================== */
+/* ============================== サンプル/クリア ============================== */
 $("btn-sample")!.addEventListener("click", ()=>{
   elHex.value="78 9c f3 48 cd c9 c9 57 28 cf 2f ca 49 01 00 1b 15 04 5d";
   elB64.value="eJzzSM3JyVcozy/KSQEAUw==";
@@ -697,5 +713,7 @@ $("btn-share")!.addEventListener("click", async ()=>{
       return;
     }catch(e){ console.warn("deflate デコード失敗", e); }
   }
+  // 何も指定がなければエディタ内容から自動圧縮
+  elIterVal.textContent = String(elIter.value || "10");
   debounceCompress();
 })();
