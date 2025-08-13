@@ -13,10 +13,10 @@ importers:
         version: 1.43.2
     devDependencies:
       typescript:
-        specifier: ^5.5.4
+        specifier: ^5.9.2
         version: 5.9.2
       vite:
-        specifier: ^6.0.0
+        specifier: ^6.3.5
         version: 6.3.5
 
 packages:
