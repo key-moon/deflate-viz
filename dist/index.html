@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Deflate 可視化 + Zopfli圧縮 (Vite)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root{
+        --bg:#0b1020; --panel:#121a2e; --ink:#e8f0ff; --muted:#9db1d0; --accent:#5ac8fa;
+        --bad:#ff5e57; --ok:#32d74b; --chip:#223050;
+        --blocks-height: 340px;
+      }
+      *{box-sizing:border-box}
+      body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji");}
+      header{
+        position:sticky; top:0; z-index:10; padding:10px 12px;
+        background:linear-gradient(to bottom, rgba(18,26,46,.95), rgba(18,26,46,.65));
+        backdrop-filter: blur(6px); border-bottom:1px solid rgba(255,255,255,.06);
+        display:grid; grid-template-rows:auto auto; gap:6px;
+      }
+      header h1{margin:0; font-size:16px; color:var(--accent)}
+      .small{font-size:12px} .muted{color:var(--muted)} .mono{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono"}
+      .err{color:var(--bad); white-space:pre-wrap}
+      .success{color:var(--ok)}
+      .hidden{display:none}
+
+      /* アラート行（最上段に固定） */
+      #alerts{display:flex; gap:12px; align-items:center; min-height:18px}
+
+      /* レイアウト */
+      .stack{display:grid; grid-template-rows: auto 1fr; gap:8px; height:calc(100vh - 56px); padding:8px;}
+      .row{display:grid; grid-template-columns: 1fr 1fr; gap:8px; min-height:0;}
+      .panel{background:var(--panel); border:1px solid #233353; border-radius:12px; overflow:hidden; min-height:0;}
+      .panel h2{margin:8px 12px; font-size:13px; color:#cfe3ff}
+      .section{padding:10px 12px; border-top:1px solid rgba(255,255,255,.06)}
+      .rowline{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+
+      /* 入力ツールバー：アイコン＋テキスト */
+      .toolbar{display:flex; gap:8px; align-items:center; padding:10px 12px; border-top:1px solid rgba(255,255,255,.06); flex-wrap:wrap}
+      .btn{
+        display:inline-flex; align-items:center; gap:6px;
+        height:32px; padding:0 10px; border-radius:8px; border:1px solid #243151;
+        background:#0f1527; color:var(--ink); cursor:pointer; user-select:none;
+      }
+      .btn:hover{filter:brightness(1.08)}
+      .btn svg{width:18px; height:18px; fill:#cfe3ff}
+      .btn .text{font-size:12px}
+      .toolbar .sep{width:1px; height:22px; background:#243151; margin:0 2px}
+      input[type="text"], textarea{
+        background:#0f1527; color:var(--ink); border:1px solid #243151; border-radius:8px; padding:8px; outline:none;
+      }
+      textarea{height:64px; resize:vertical}
+
+      /* ドラッグ&ドロップ */
+      #pane-io.drop{outline:2px dashed var(--accent); outline-offset:-6px; box-shadow: inset 0 0 0 9999px rgba(90,200,250,.08);}
+
+      /* ブロック情報（固定高スクロール） */
+      #pane-blocks{height:var(--blocks-height); display:flex; flex-direction:column;}
+      #blocksScroll{flex:1 1 auto; overflow:auto; padding:4px 12px 10px;}
+      .blocks{display:flex; flex-direction:column; gap:8px;}
+      .block{border:1px solid #2b3c61; border-radius:10px; padding:8px; background:#0f1527}
+      .block h3{margin:0 0 6px 0; font-size:14px; color:#cfe3ff}
+      .chipline{display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 6px 0}
+      .chip{background:#223050; border:1px solid #2b3c61; padding:2px 8px; border-radius:999px; color:#cfe3ff; font-size:12px}
+      .muteline{color:#9db1d0; font-size:12px; margin-top:2px}
+
+      /* 長さごとのシンボル表（ASCII注釈対応） */
+      .len-table{width:100%; border-collapse:collapse; font-size:12px; margin-top:6px}
+      .len-table th,.len-table td{border-bottom:1px solid #253757; padding:3px 4px; text-align:left; vertical-align:top}
+      .len-table th{color:#9db1d0; position:sticky; top:0; background:#0f1527}
+      .mono-small{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono"; font-size:12px}
+      .wrap{word-break:break-word; white-space:normal}
+
+      #editorWrap{height:100%; display:flex; flex-direction:column;}
+      #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px}
+      .viz{padding:10px 12px; white-space:pre-wrap; word-wrap:anywhere; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono","Noto Sans Mono",Consolas,"Liberation Mono";}
+      ruby.tok{position:relative; display:inline-block; border-radius:6px; padding:0 .5px}
+      ruby.tok rt{
+        position:absolute; top:-1.35em; left:0; font-size:10px; line-height:1; background:#0008; padding:2px 4px; border-radius:4px; color:#eff7ff;
+        white-space:nowrap; pointer-events:none; opacity:0; transform:translateY(-2px); transition:opacity .15s ease, transform .15s ease;
+      }
+      ruby.tok:hover rt{opacity:1; transform:translateY(0)}
+      .legend{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+      .chip2{background:#223050; border:1px solid #2b3c61; padding:3px 8px; border-radius:999px; color:#9db1d0; font-size:12px}
+    </style>
+    <script type="module" crossorigin src="./assets/index-CU6phb0G.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Deflate 可視化 + Zopfli圧縮（Vite/ESM）</h1>
+      <div id="alerts">
+        <span id="error" class="err hidden"></span>
+        <span id="success" class="success hidden"></span>
+        <div class="small muted">上段: 入力＋ブロック情報（固定高スクロール） / 下段: エディタ（Python）＋可視化。URL共有 & zlib/raw切替。</div>
+      </div>
+    </header>
+
+    <div class="stack">
+      <!-- 上段 -->
+      <div class="row" id="row-top">
+        <div class="panel" id="pane-io">
+          <h2>入力とオプション</h2>
+
+          <!-- ツールバー（テキスト付き） -->
+          <div class="toolbar" id="toolbar">
+            <button id="btn-parse" class="btn" title="この入力を解析">
+              <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 1 1-6.364 2.636L3 3v6h6L6.874 6.874A7 7 0 1 0 13 5V3z"/></svg>
+              <span class="text">解析</span>
+            </button>
+            <button id="btn-sample" class="btn" title="サンプルを投入">
+              <svg viewBox="0 0 24 24"><path d="M12 3l4 8H8l4-8zm0 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
+              <span class="text">サンプル</span>
+            </button>
+            <button id="btn-clear" class="btn" title="入力をクリア">
+              <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3V6zm2 4h14l-1.5 9h-11L5 10zm5-7h4l1 2H9l1-2z"/></svg>
+              <span class="text">クリア</span>
+            </button>
+            <span class="sep"></span>
+            <input id="fileInput" type="file" accept=".deflate,.zlib,.bin,.raw,*/*" style="display:none" />
+            <button id="btn-file" class="btn" title="ファイルを読み込む（クリック or ドラッグ＆ドロップ）">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>
+              <span class="text">読み込み / DD</span>
+            </button>
+            <span class="sep"></span>
+            <input id="rawMode" type="checkbox" />
+            <label for="rawMode" class="small">生DEFLATE</label>
+            <span class="sep"></span>
+            <button id="btn-share" class="btn" title="URLを共有">
+              <svg viewBox="0 0 24 24"><path d="M18 8a3 3 0 1 0-2.83-4H12v2h3.17A3 3 0 0 0 18 8zm-3 8H8a3 3 0 1 0 0 2h7v2l4-3-4-3v2zM12 10H8v2h4v2l4-3-4-3v2z"/></svg>
+              <span class="text">共有</span>
+            </button>
+          </div>
+
+          <!-- 入力欄（控えめ） -->
+          <div class="section">
+            <div class="rowline"><label class="small">16進入力（スペース/改行OK）</label></div>
+            <textarea id="hex" class="mono" placeholder="例: 78 9c f3 48 cd c9 c9 57 28 cf 2f ca 49 01 00 1b 15 04 5d"></textarea>
+            <div class="rowline">
+              <label class="small">Base64</label>
+              <input id="b64" type="text" class="mono" placeholder="例: eJzzSM3JyVcozy/KSQEAUw==" />
+            </div>
+            <div class="rowline small muted">
+              <span>※ gzipは未対応。zlib(2Bヘッダ+Adler32)/生DEFLATEに対応。ファイルは上の「読み込み / DD」へ。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="pane-blocks">
+          <h2>ブロック情報（要約 + 長さ別シンボル表）</h2>
+          <div id="blocksScroll"><div id="blocks" class="blocks"></div></div>
+          <div id="zlibNote" class="small muted" style="padding:6px 12px"></div>
+        </div>
+      </div>
+
+      <!-- 下段 -->
+      <div class="row" id="row-bottom">
+        <div class="panel" id="pane-editor">
+          <h2>エディタ (Python, 変更で即Zopfli圧縮)</h2>
+          <div id="editorWrap">
+            <div id="editor">// Pythonサンプル
+def greet(name: str) -> str:
+    return f"hello {name}\n"
+
+print(greet("world"))
+</div>
+          </div>
+        </div>
+
+        <div class="panel" id="pane-viz">
+          <h2>可視化（トークン彩色 & ルビ注釈）</h2>
+          <div class="legend"><span class="chip2 small">ホバーで種別/パラメータ/ビット長</span></div>
+          <div id="output" class="viz"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Viteエントリ -->
+  </body>
+</html>
