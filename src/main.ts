@@ -11,7 +11,10 @@ async function getZopfli(): Promise<ZopfliFn> {
   try {
     // 現在のスクリプトURLからベースパスを取得し、それを基にパスを組み立て
     const scriptUrl = new URL(import.meta.url);
-    const base = scriptUrl.pathname.substring(0, scriptUrl.pathname.lastIndexOf('/') + 1);
+    let base = scriptUrl.pathname.substring(0, scriptUrl.pathname.lastIndexOf('/') + 1);
+    if (scriptUrl.host.endsWith("github.io")) {
+      base = scriptUrl.pathname.split('/').slice(0, 2).join('/') + '/';
+    }
     const path = base === './' ? '/gzip_zopfli_worker.mjs' : `${base}gzip_zopfli_worker.mjs`;
     console.log(`Trying to load worker from: ${path}`);
     
