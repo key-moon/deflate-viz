@@ -314,7 +314,6 @@ function litBgFor(bitlen: number, maxBits: number) {
   const light = (bitlen % 2 === 0) ? 32 : 26; // 偶奇で明度差
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
-/** counts 用の同系グラデーション（小=赤 → 大=緑） */
 function countBgFor(count: number, maxCount: number) {
   if (maxCount <= 0) return `hsl(0deg 0% 18% / .0)`;
   const denom = Math.max(1, maxCount - 1);
@@ -323,8 +322,6 @@ function countBgFor(count: number, maxCount: number) {
   const light = (count % 2 === 0) ? 32 : 26;
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
-
-/** LIT 凡例（ビット長スケール）更新 */
 function updateLitLegend(maxBits: number) {
   const bar = $("litLegendBar") as HTMLDivElement;
   const minLab = $("litLegendMin") as HTMLSpanElement;
@@ -340,8 +337,6 @@ function updateLitLegend(maxBits: number) {
   minLab.textContent = "1b";
   maxLab.textContent = `${maxBits}b`;
 }
-
-/** 使用回数凡例（0〜maxCount, 小=赤→大=緑）更新 */
 function updateCountLegend(maxCount: number) {
   const bar = $("countLegendBar") as HTMLDivElement;
   const stops: string[] = [];
@@ -368,7 +363,6 @@ function clearHighlights(container: HTMLElement) {
   container.querySelectorAll<HTMLElement>('.ch.refch').forEach(el => el.classList.remove('refch'));
 }
 function applyHighlight(container: HTMLElement, refStart: number, refEnd: number, tokenId: string) {
-  // 参照元文字を強調
   const rubies = Array.from(container.querySelectorAll<HTMLElement>('ruby.tok'));
   for (const ruby of rubies) {
     const ss = parseInt(ruby.dataset.spanStart || "-1", 10);
@@ -380,7 +374,6 @@ function applyHighlight(container: HTMLElement, refStart: number, refEnd: number
         if (abs >= refStart && abs < refEnd) ch.classList.add('refch');
       });
     }
-    // 同一トークン（断片）を同時強調
     if (ruby.dataset.tokenId === tokenId) ruby.classList.add('ref-target', 'same-token');
   }
 }
@@ -393,10 +386,8 @@ function lockClear(container: HTMLElement) {
 }
 function lockToken(container: HTMLElement, tokenId: string, type: string) {
   locked = true;
-  // 同一トークン断片
   container.querySelectorAll<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`)
     .forEach(el => el.classList.add("same-token","hit","ref-target"));
-  // 参照 (MATCH)
   if (type === "match") {
     const any = container.querySelector<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`);
     if (any) {
@@ -469,7 +460,7 @@ function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]
         const ch = document.createElement("span");
         ch.className = "ch";
         ch.dataset.abs = String(absStart + i);
-        ch.textContent = p[i];
+        ch.textContent = p[i]; // \t は CSS tab-size で見た目だけ広げる
         rb.appendChild(ch);
       }
 
@@ -483,7 +474,7 @@ function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]
 
       // ホバー：同一トークン断片 + 参照（MATCH）
       ruby.addEventListener("mouseenter", (ev) => {
-        if (locked) return; // ロック中は hover 無効
+        if (locked) return;
         const me = ev.currentTarget as HTMLElement;
         const tokenId = me.dataset.tokenId!;
         container.querySelectorAll<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`)
@@ -565,7 +556,7 @@ function groupByLength(codeLengths?: number[]) {
   return new Map([...map.entries()].sort((a,b)=>a[0]-b[0]));
 }
 
-/* ============================== makeLenTable（復活） ============================== */
+/* ============================== makeLenTable ============================== */
 function makeLenTable(title: string, codeLengths?: number[], isLitLen = false) {
   const wrap = document.createElement("div");
   const head = document.createElement("div");
@@ -585,7 +576,7 @@ function makeLenTable(title: string, codeLengths?: number[], isLitLen = false) {
     const td1=document.createElement("td"); td1.textContent=String(len);
     const td2=document.createElement("td"); td2.textContent=String(syms.length);
     const td3=document.createElement("td"); td3.className="mono-small wrap";
-    td3.textContent = rangesWithAscii(syms, isLitLen); // ASCII注釈
+    td3.textContent = rangesWithAscii(syms, isLitLen);
     tr.append(td1,td2,td3); tbl.appendChild(tr);
   });
   wrap.appendChild(tbl);
@@ -839,10 +830,10 @@ function extractDeflateFromGzip(gz: Uint8Array): Uint8Array {
     need(2); off += 2;
   }
   if (off > gz.length - 8) throw new Error("gzipボディが存在しません");
-  return gz.subarray(off, gz.length - 8); // 末尾8B（CRC32, ISIZE）除外
+  return gz.subarray(off, gz.length - 8);
 }
 function wrapZlib(deflateRaw: Uint8Array, adler: number): Uint8Array {
-  const zhead = new Uint8Array([0x78, 0x9c]); // 32KB窓 & 既定圧縮（FCHECK整合）
+  const zhead = new Uint8Array([0x78, 0x9c]);
   const tail  = u32beBytes(adler);
   const out = new Uint8Array(2 + deflateRaw.length + 4);
   out.set(zhead, 0);
@@ -868,6 +859,9 @@ const editor = ace.edit("editor", {
   wrap: true,
   useWorker: false
 });
+editor.session.setTabSize(2);
+editor.session.setUseSoftTabs(true);
+
 const fitEditor = () => {
   const wrap = document.getElementById("editorWrap")!;
   const h = wrap.clientHeight;
@@ -890,6 +884,8 @@ const okDiv = $("success") as HTMLSpanElement;
 const paneIO = $("pane-io") as HTMLDivElement;
 const elIter = $("iter") as HTMLInputElement;
 const elIterVal = $("iterVal") as HTMLSpanElement;
+const elDeflateLen = $("deflateLen") as HTMLSpanElement;
+const elCodeLen = $("codeLen") as HTMLSpanElement;
 
 const setErr = (m: string) => { errDiv.textContent = m; errDiv.classList.remove("hidden"); okDiv.classList.add("hidden"); };
 const setOk  = (m: string) => { okDiv .textContent = m; okDiv .classList.remove("hidden"); errDiv.classList.add("hidden"); };
@@ -898,6 +894,10 @@ const clearMsgs=()=>{ errDiv.classList.add("hidden"); errDiv.textContent=''; okD
 /* ============================== エディタ同期（再帰抑止） ============================== */
 let isProgrammaticEditorUpdate = false;
 let lastCompressedB64: string | null = null;
+
+/* ============================== ラベル更新ユーティリティ ============================== */
+function updateDeflateLenLabel(n: number){ if (elDeflateLen) elDeflateLen.textContent = String(n); }
+function updateCodeLenLabel(n: number){ if (elCodeLen) elCodeLen.textContent = String(n); }
 
 /* ============================== 圧縮→可視化 ============================== */
 let compressTimer: number | null = null as any;
@@ -924,6 +924,10 @@ async function compressFromEditorAndVisualize() {
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
+
+    // ラベル更新
+    updateDeflateLenLabel(comp.length);
+    updateCodeLenLabel(decoded.length);
 
     // 圧縮バイト列が変化した場合のみ、エディタを更新（再帰抑止）
     if (lastCompressedB64 !== compB64) {
@@ -971,6 +975,11 @@ $("btn-parse")!.addEventListener("click", ()=>{
 
     const decoded = dec.decode(outputBytes);
     const nowB64 = b64enc(bytes);
+
+    // ラベル更新
+    updateDeflateLenLabel(bytes.length);
+    updateCodeLenLabel(decoded.length);
+
     if (lastCompressedB64 !== nowB64) lastCompressedB64 = nowB64;
 
     if (editor.getValue() !== decoded) {
@@ -1016,6 +1025,11 @@ async function handleFile(f: File){
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
+
+    // ラベル更新
+    updateDeflateLenLabel(buf.length);
+    updateCodeLenLabel(decoded.length);
+
     if (editor.getValue() !== decoded) {
       isProgrammaticEditorUpdate = true;
       editor.setValue(decoded, -1);
@@ -1074,6 +1088,8 @@ $("btn-share")!.addEventListener("click", async ()=>{
       editor.setValue(text, -1);
       isProgrammaticEditorUpdate = false;
       elIterVal.textContent = String(elIter.value || "10");
+      updateCodeLenLabel(text.length);          // 先にコード長だけ表示
+      updateDeflateLenLabel(0);                 // deflate は圧縮完了後に更新
       debounceCompress();
       return;
     }catch(e){ console.warn("text デコード失敗", e); }
@@ -1084,19 +1100,18 @@ $("btn-share")!.addEventListener("click", async ()=>{
       elB64.value = d;
       elHex.value = bytesToHex(bytes);
       lastCompressedB64 = d;
+      updateDeflateLenLabel(bytes.length);      // 先に deflate 長を表示
       $("btn-parse")!.click();
       return;
     }catch(e){ console.warn("deflate デコード失敗", e); }
   }
-  // 何も指定がなければエディタ内容から自動圧縮
   elIterVal.textContent = String(elIter.value || "10");
   debounceCompress();
 })();
 
 /* ============================== グローバル：クリックでロック解除 / ESCで解除 ============================== */
-document.addEventListener("click", (e)=>{
+document.addEventListener("click", ()=>{
   const out = $("output");
-  // ブロック側のセルクリックは stopPropagation 済み。その他は解除。
   lockClear(out);
   tooltip.hide();
 });

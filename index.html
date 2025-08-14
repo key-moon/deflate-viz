@@ -9,7 +9,7 @@
         --bg:#0b1020; --panel:#121a2e; --ink:#e8f0ff; --muted:#9db1d0; --accent:#5ac8fa;
         --bad:#ff5e57; --ok:#32d74b; --chip:#223050;
         --blocks-height: 340px;
-        --refch:#5d1919; /* 参照中の文字色 */
+        --refch:#5d1919; /* 参照中の文字色（指定値） */
       }
       *{box-sizing:border-box}
       body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji");}
@@ -28,7 +28,7 @@
       .small{font-size:12px} .muted{color:var(--muted)} .mono{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono"}
       .err{color:var(--bad); white-space:pre; max-width:45vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
       .success{color:var(--ok); white-space:nowrap}
-      .hidden{visibility:hidden} /* 高さ変動を避けるため visibility で消す */
+      .hidden{visibility:hidden}
 
       /* レイアウト */
       .stack{display:grid; grid-template-rows: auto 1fr; gap:8px; height:calc(100vh - 56px); padding:8px;}
@@ -39,7 +39,7 @@
       .section{padding:10px 12px; border-top:1px solid rgba(255,255,255,.06)}
       .rowline{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
 
-      /* 入力ツールバー：アイコン＋テキスト */
+      /* 入力ツールバー */
       .toolbar{display:flex; gap:8px; align-items:center; padding:10px 12px; border-top:1px solid rgba(255,255,255,.06); flex-wrap:wrap}
       .btn{
         display:inline-flex; align-items:center; gap:6px;
@@ -95,12 +95,13 @@
         color:#e6f1ff;
         min-height:16px;
         user-select:text;
+        tab-size:2; -moz-tab-size:2;
       }
       .codecell.missing{ color:#7a8aa0; background:transparent; }
 
       /* エディタ */
       #editorWrap{height:100%; display:flex; flex-direction:column;}
-      #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px}
+      #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px; tab-size:2; -moz-tab-size:2;}
 
       /* 見出し右側の iterations スライダ */
       #iterControls{display:flex; align-items:center; gap:8px;}
@@ -114,9 +115,10 @@
       #vizScroll{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:10px 12px; min-height:0;}
       .viz{
         white-space:pre-wrap;           /* 改行保持＋折り返し */
-        overflow-wrap:anywhere;         /* 横スクロール禁止のため強制折り返し */
+        overflow-wrap:anywhere;         /* 横スクロール禁止 */
         word-break:break-word;
         max-width:100%;
+        tab-size:2; -moz-tab-size:2;   /* タブ幅=2（可視化側） */
         font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono","Noto Sans Mono",Consolas,"Liberation Mono";
       }
 
@@ -130,14 +132,12 @@
         padding:0 .5px; border-radius:6px;
         box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
       }
-
-      /* 改行分断時の境界調整（角丸とボーダーを内側で消す） */
+      /* 改行分断時の境界調整 */
       ruby.tok.match.frag-mid{ border:none; border-radius:0; box-shadow:none; }
       ruby.tok.match.frag-start{ border-right:none; border-top-right-radius:0; border-bottom-right-radius:0; }
       ruby.tok.match.frag-end{ border-left:none; border-top-left-radius:0; border-bottom-left-radius:0; }
-      ruby.tok.frag-mid{ border-radius:0; } /* LIT/RAWは枠が無いが角丸だけ揃える */
-
-      /* 同一トークン断片の同時強調 & クリック固定 */
+      ruby.tok.frag-mid{ border-radius:0; }
+      /* 同一トークン断片強調 & クリック固定 */
       ruby.tok.same-token{
         outline:1px solid rgba(90,200,250,.35);
         outline-offset:1px;
@@ -146,7 +146,6 @@
         box-shadow: inset 0 0 0 2px #3349b8, 0 0 0 2px rgba(51,73,184,.25);
         border-color:#5c71e0;
       }
-
       /* 参照元ハイライト（文字単位） */
       .ch{white-space:pre;}
       .ch.refch{
@@ -155,11 +154,10 @@
         text-shadow: 0 0 0.5px rgba(255,255,255,.25);
       }
       ruby.tok.ref-target{
-        box-shadow: inset 0 0 0 3px #b83333, 0 0 0 3px rgba(51,73,184,.25);
-        border-color:#e05c5c;
+        box-shadow: inset 0 0 0 2px #3349b8, 0 0 0 2px rgba(51,73,184,.25);
+        border-color:#5c71e0;
       }
-
-      /* ルビ（ホバー情報）— トークン「の下」に出す */
+      /* ルビ（下側に出す） */
       ruby.tok rt{
         position:absolute; left:0; bottom:-1.35em;
         font-size:10px; line-height:1; background:#0008; padding:2px 4px; border-radius:4px; color:#eff7ff;
@@ -167,7 +165,7 @@
         z-index:10;
       }
       ruby.tok:hover rt{opacity:1; transform:translateY(0)}
-      ruby.tok rb{white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word}
+      ruby.tok rb{white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; tab-size:2; -moz-tab-size:2;}
 
       /* 凡例（min | bar | max の3カラム） */
       .legend{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
@@ -183,6 +181,7 @@
       .legend-lit .bar{
         width:100%; height:10px; border-radius:999px; border:1px solid #2b3c61; background:#1a2746; box-shadow: inset 0 0 0 1px #12203b;
       }
+      .inlineStat{margin-left:8px}
     </style>
   </head>
   <body>
@@ -202,7 +201,6 @@
         <div class="panel" id="pane-io">
           <h2 class="h2bar"><span>入力とオプション</span></h2>
 
-          <!-- ツールバー（テキスト付き） -->
           <div class="toolbar" id="toolbar">
             <button id="btn-parse" class="btn" title="この入力を解析">
               <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 1 1-6.364 2.636L3 3v6h6L6.874 6.874A7 7 0 1 0 13 5V3z"/></svg>
@@ -257,7 +255,10 @@
       <div class="row" id="row-bottom">
         <div class="panel" id="pane-editor">
           <h2 class="h2bar">
-            <span>エディタ (Python, 変更で即Zopfli圧縮)</span>
+            <span>
+              エディタ (Python, 変更で即Zopfli圧縮)
+              <span class="chip2 small mono inlineStat">code <span id="codeLen">0</span></span>
+            </span>
             <div id="iterControls" class="ctl">
               <label for="iter">Zopfli iterations:</label>
               <input id="iter" type="range" min="1" max="50" step="1" value="10" />
@@ -285,18 +286,22 @@
         </div>
 
         <div class="panel" id="pane-viz">
-          <h2 class="h2bar"><span>可視化（トークン彩色 & ルビ注釈）</span></h2>
+          <h2 class="h2bar">
+            <span>
+              可視化（トークン彩色 & ルビ注釈）
+              <span class="chip2 small mono inlineStat">deflate <span id="deflateLen">0</span> B</span>
+            </span>
+          </h2>
           <div id="vizHeader">
             <div class="legend">
               <span class="chip2 small">ホバー: 種別/パラメータ/bit長・参照先 / クリック: 固定ハイライト</span>
               <div class="legend-lit" aria-label="LITビット長スケール（緑=短, 赤=長）">
                 <div class="scale"><span id="litLegendMin">1b</span></div>
-                <div class="bar" id="litLegendBar"></div>
+                <div class="bar" id="litLegendBar" title="LIT token bit-length scale"></div>
                 <div class="scale"><span id="litLegendMax">9b</span></div>
               </div>
             </div>
           </div>
-          <!-- スクロール領域（縦のみ） -->
           <div id="vizScroll">
             <div id="output" class="viz"></div>
           </div>
