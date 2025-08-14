@@ -300,7 +300,7 @@ function getMaxLitBits(blocks: BlockInfo[]): number {
 function litBgFor(bitlen: number, maxBits: number) {
   const denom = Math.max(1, maxBits - 1);
   const t = Math.max(0, Math.min(1, (bitlen - 1) / denom));
-  const hue = 120 - 120 * t;            // 緑(120)→赤(0)
+  const hue = 120 - 120 * t;                  // 緑(120)→赤(0)
   const light = (bitlen % 2 === 0) ? 32 : 26; // 偶奇で明度差
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
@@ -322,40 +322,99 @@ function updateLitLegend(maxBits: number) {
   maxLab.textContent = `${maxBits}b`;
 }
 
-/** トークン描画（MATCH は縁取りのみ・背景なし） */
+/* ======== 参照元ハイライト（MATCH ホバー）: 文字単位で太字＋色変更 ======== */
+function rangesOverlap(a0: number, a1: number, b0: number, b1: number) {
+  return Math.max(a0, b0) < Math.min(a1, b1);
+}
+function clearHighlights(container: HTMLElement) {
+  container.querySelectorAll<HTMLElement>('ruby.tok.ref-target').forEach(el => el.classList.remove('ref-target'));
+  container.querySelectorAll<HTMLElement>('.ch.refch').forEach(el => el.classList.remove('refch'));
+}
+function applyHighlight(container: HTMLElement, refStart: number, refEnd: number, target: HTMLElement) {
+  clearHighlights(container);
+  const rubies = Array.from(container.querySelectorAll<HTMLElement>('ruby.tok'));
+  for (const ruby of rubies) {
+    const ss = parseInt(ruby.dataset.spanStart || "-1", 10);
+    const se = parseInt(ruby.dataset.spanEnd   || "-1", 10);
+    if (ss >= 0 && se >= 0 && rangesOverlap(ss, se, refStart, refEnd)) {
+      const chars = ruby.querySelectorAll<HTMLElement>('.ch');
+      chars.forEach(ch => {
+        const abs = parseInt(ch.dataset.abs || "-1", 10);
+        if (abs >= refStart && abs < refEnd) ch.classList.add('refch');
+      });
+    }
+  }
+  target.classList.add('ref-target');
+}
+
+/** トークン描画（MATCH: 背景なし・枠線のみ）＋ data-* と char span 付与 */
 function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]) {
   container.innerHTML = "";
   const maxLitBits = getMaxLitBits(blocks);
+
   for (let ti = 0; ti < tokens.length; ti++) {
     const t = tokens[ti];
-    const parts = t.text.split("\n");
+
+    const createRuby = (textPart: string, partAbsStart: number) => {
+      const ruby = document.createElement("ruby");
+      ruby.className = "tok";
+      if (t.type === "lit") {
+        (ruby.style as any).background = litBgFor(t.bitsUsed || 1, maxLitBits);
+        ruby.classList.add("lit");
+      } else if (t.type === "match") {
+        ruby.classList.add("match"); // CSSで枠線のみ
+      } else {
+        (ruby.style as any).background = defaultBg(ti);
+        ruby.classList.add("raw");
+      }
+      ruby.dataset.type = t.type;
+      ruby.dataset.spanStart = String(t.spanStart ?? -1);
+      ruby.dataset.spanEnd   = String(t.spanEnd   ?? -1);
+
+      if (t.type === "match") {
+        const refStart = Math.max(0, (t.spanStart | 0) - (t.distance | 0));
+        const refLen = Math.max(0, Math.min(t.length | 0, t.distance | 0));
+        const refEnd = refStart + refLen;
+        ruby.dataset.refStart = String(refStart);
+        ruby.dataset.refEnd = String(refEnd);
+        ruby.addEventListener("mouseenter", (ev) => {
+          const me = ev.currentTarget as HTMLElement;
+          const rs = parseInt(me.dataset.refStart || "-1", 10);
+          const re = parseInt(me.dataset.refEnd   || "-1", 10);
+          if (rs >= 0 && re > rs) applyHighlight(container, rs, re, me);
+        });
+        ruby.addEventListener("mouseleave", () => clearHighlights(container));
+      }
+
+      const rb = document.createElement("rb");
+      for (let i = 0; i < textPart.length; i++) {
+        const span = document.createElement("span");
+        span.className = "ch";
+        span.dataset.abs = String(partAbsStart + i);
+        span.textContent = textPart[i];
+        rb.appendChild(span);
+      }
+      const rt = document.createElement("rt");
+      const head = t.type === 'lit' ? 'LIT' : t.type === 'match' ? 'MATCH' : 'RAW';
+      rt.textContent = `${head} ${t.type==='match' ? `(L=${t.length},D=${t.distance})` : `(L=${t.length})`}  ${t.bitsUsed}b`;
+      ruby.append(rb, rt);
+      return ruby;
+    };
+
+    const parts = (t.text || "").split("\n");
+    let carried = 0;
     parts.forEach((p: string, j: number) => {
       if (p.length > 0) {
-        const ruby = document.createElement("ruby");
-        ruby.className = "tok";
-        // クラス割当と色
-        if (t.type === "lit") {
-          (ruby.style as any).background = litBgFor(t.bitsUsed || 1, maxLitBits);
-          ruby.classList.add("lit");
-        } else if (t.type === "match") {
-          // 背景は付けない・枠線のみ（CSS側で制御）
-          ruby.classList.add("match");
-        } else {
-          // RAW は既定の淡い塗り
-          (ruby.style as any).background = defaultBg(ti);
-          ruby.classList.add("raw");
-        }
-        const rb=document.createElement("rb");
-        rb.textContent=p;
-        const rt=document.createElement("rt");
-        const head=t.type==='lit'?'LIT':t.type==='match'?'MATCH':'RAW';
-        rt.textContent=`${head} ${t.type==='match' ? `(L=${t.length},D=${t.distance})` : `(L=${t.length})`}  ${t.bitsUsed}b`;
-        ruby.append(rb,rt); container.appendChild(ruby);
+        const absStart = (t.spanStart | 0) + carried;
+        container.appendChild(createRuby(p, absStart));
+        carried += p.length;
       }
-      if (j<parts.length-1) container.appendChild(document.createTextNode("\n"));
+      if (j < parts.length - 1) {
+        container.appendChild(document.createTextNode("\n"));
+        carried += 1; // 改行分
+      }
     });
   }
-  // 凡例（ビット長スケール）も同時に更新
   updateLitLegend(maxLitBits);
 }
 
@@ -509,7 +568,7 @@ function extractDeflateFromGzip(gz: Uint8Array): Uint8Array {
     need(2); off += 2;
   }
   if (off > gz.length - 8) throw new Error("gzipボディが存在しません");
-  return gz.subarray(off, gz.length - 8); // 末尾8バイト（CRC32, ISIZE）除外
+  return gz.subarray(off, gz.length - 8); // 末尾8B（CRC32, ISIZE）除外
 }
 function wrapZlib(deflateRaw: Uint8Array, adler: number): Uint8Array {
   const zhead = new Uint8Array([0x78, 0x9c]); // 32KB窓 & 既定圧縮（FCHECK整合）
@@ -529,11 +588,11 @@ async function zopfliCompressWithWorker(input: Uint8Array, raw: boolean, numIter
   return wrapZlib(deflateRaw, ad);
 }
 
-/* ============================== Ace Editor 初期化（フォントサイズUP） ============================== */
+/* ============================== Ace Editor 初期化（フォント少しUP） ============================== */
 const editor = ace.edit("editor", {
   mode: "ace/mode/python",
   theme: "ace/theme/monokai",
-  fontSize: "15px",           // 少し大きく
+  fontSize: "15px",
   showPrintMargin: false,
   wrap: true,
   useWorker: false
@@ -559,7 +618,7 @@ const errDiv = $("error") as HTMLSpanElement;
 const okDiv = $("success") as HTMLSpanElement;
 const paneIO = $("pane-io") as HTMLDivElement;
 
-/* エディタ下の iterations スライダ */
+/* 見出し内 iterations スライダ */
 const elIter = $("iter") as HTMLInputElement;
 const elIterVal = $("iterVal") as HTMLSpanElement;
 
@@ -597,12 +656,12 @@ async function compressFromEditorAndVisualize() {
 
     const decoded = dec.decode(outputBytes);
 
-    // ★ 圧縮バイト列が「変化した」場合のみ、エディタを更新（再帰抑止）
+    // 圧縮バイト列が変化した場合のみ、エディタを更新（再帰抑止）
     if (lastCompressedB64 !== compB64) {
       lastCompressedB64 = compB64;
       if (editor.getValue() !== decoded) {
         isProgrammaticEditorUpdate = true;
-        editor.setValue(decoded, -1); // カーソル移動なし
+        editor.setValue(decoded, -1);
         isProgrammaticEditorUpdate = false;
       }
     }
@@ -642,11 +701,9 @@ $("btn-parse")!.addEventListener("click", ()=>{
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
-    // 解析からの可視化更新時には lastCompressedB64 を保持（ここでは未更新の場合もある）
     const nowB64 = b64enc(bytes);
     if (lastCompressedB64 !== nowB64) lastCompressedB64 = nowB64;
 
-    // 手動解析でもエディタ内容を同期（再帰抑止）
     if (editor.getValue() !== decoded) {
       isProgrammaticEditorUpdate = true;
       editor.setValue(decoded, -1);
@@ -661,13 +718,12 @@ $("btn-parse")!.addEventListener("click", ()=>{
 $("btn-sample")!.addEventListener("click", ()=>{
   elHex.value="78 9c f3 48 cd c9 c9 57 28 cf 2f ca 49 01 00 1b 15 04 5d";
   elB64.value="eJzzSM3JyVcozy/KSQEAUw==";
-  // サンプルは zlib なので raw を明示的にオフ
-  elRaw.checked=false;
+  elRaw.checked=false; // サンプルは zlib
   $("btn-parse")!.click();
 });
 $("btn-clear")!.addEventListener("click", ()=>{
   elHex.value=""; elB64.value="";
-  outDiv.textContent=""; elBlocks.innerHTML=""; elZlibNote.textContent="";
+  outDiv.textContent=""; ( $("blocks") as HTMLDivElement ).innerHTML=""; elZlibNote.textContent="";
   clearMsgs();
 });
 
@@ -704,7 +760,6 @@ async function handleFile(f: File){
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
-    // ファイル読込時もエディタを同期
     if (editor.getValue() !== decoded) {
       isProgrammaticEditorUpdate = true;
       editor.setValue(decoded, -1);
@@ -749,7 +804,7 @@ $("btn-share")!.addEventListener("click", async ()=>{
 /* ============================== URL復元（初期） ============================== */
 (function restoreFromURL(){
   const q = new URLSearchParams(location.search);
-  // ★ デフォルト raw=1。URLに raw があるときはそれを優先。
+  // デフォルト raw=1（指定があればそれを優先）
   const rawParam = q.get("raw");
   const raw = rawParam ? (rawParam === "1") : true;
   elRaw.checked = raw;

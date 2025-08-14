@@ -9,6 +9,7 @@
         --bg:#0b1020; --panel:#121a2e; --ink:#e8f0ff; --muted:#9db1d0; --accent:#5ac8fa;
         --bad:#ff5e57; --ok:#32d74b; --chip:#223050;
         --blocks-height: 340px;
+        --refch:#5d1919; /* 参照中の文字色 */
       }
       *{box-sizing:border-box}
       body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";}
@@ -31,7 +32,8 @@
       .stack{display:grid; grid-template-rows: auto 1fr; gap:8px; height:calc(100vh - 56px); padding:8px;}
       .row{display:grid; grid-template-columns: 1fr 1fr; gap:8px; min-height:0;}
       .panel{background:var(--panel); border:1px solid #233353; border-radius:12px; overflow:hidden; min-height:0;}
-      .panel h2{margin:8px 12px; font-size:13px; color:#cfe3ff}
+      .panel h2{margin:0; font-size:13px; color:#cfe3ff}
+      .panel .h2bar{display:flex; justify-content:space-between; align-items:center; padding:8px 12px;}
       .section{padding:10px 12px; border-top:1px solid rgba(255,255,255,.06)}
       .rowline{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
 
@@ -75,52 +77,71 @@
       #editorWrap{height:100%; display:flex; flex-direction:column;}
       #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px}
 
-      /* エディタ直下の iterations スライダ */
-      #iterWrap{display:flex; align-items:center; gap:10px; padding:8px 12px 12px; border-top:1px solid rgba(255,255,255,.06)}
-      #iterWrap .label{font-size:12px; color:#9db1d0}
+      /* 見出し右側の iterations スライダ */
+      #iterControls{display:flex; align-items:center; gap:8px;}
+      #iterControls label{font-size:12px; color:#9db1d0}
       #iter{width:200px; height:4px;}
       #iterVal{min-width:2ch; display:inline-block}
 
       /* 可視化（縦スクロールのみ、横禁止） */
       #pane-viz{display:flex; flex-direction:column; min-height:0;}
-      #vizHeader{padding:0 12px 8px;}
+      #vizHeader{padding:8px 12px 0;}
       #vizScroll{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:10px 12px; min-height:0;}
       .viz{
-        white-space:pre-wrap; /* 改行保持＋折り返し */
-        overflow-wrap:anywhere; /* 横スクロール禁止のため強制折り返し */
+        white-space:pre-wrap;           /* 改行保持＋折り返し */
+        overflow-wrap:anywhere;         /* 横スクロール禁止のため強制折り返し */
         word-break:break-word;
         max-width:100%;
         font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono","Noto Sans Mono",Consolas,"Liberation Mono";
       }
 
-      /* トークン（MATCH は縁取りのみ） */
+      /* トークン（MATCH は縁取りのみ、色は #3349b8） */
       ruby.tok{position:relative; display:inline-block; border-radius:6px; padding:0 .5px}
-      ruby.tok.lit{ /* LIT: 背景はJS側でセット */ }
-      ruby.tok.raw{ /* RAW: 背景はJS側でセット */ }
+      ruby.tok.lit{ /* JSで背景色を付与 */ }
+      ruby.tok.raw{ /* JSで背景色を付与 */ }
       ruby.tok.match{
         background:transparent !important; /* 塗りなし */
-        border:1px solid #3349b8;       /* 縁取り */
+        border:1px solid #3349b8;          /* 縁取り（ご指定） */
         padding:0 .5px; border-radius:6px;
         box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
       }
-      /* ルビ */
+
+      /* 参照元ハイライト（文字単位） */
+      .ch{white-space:pre;}
+      .ch.refch{
+        font-weight:700;
+        color:var(--refch);
+        text-shadow: 0 0 0.5px rgba(255,255,255,.05);
+      }
+      ruby.tok.ref-target{
+        box-shadow: inset 0 0 0 2px #3349b8, 0 0 0 2px rgba(51,73,184,.25);
+        border-color:#5c71e0;
+      }
+
+      /* ルビ（ホバー情報）— トークン「の下」に出す */
       ruby.tok rt{
-        position:absolute; top:-1.35em; left:0; font-size:10px; line-height:1; background:#0008; padding:2px 4px; border-radius:4px; color:#eff7ff;
-        white-space:nowrap; pointer-events:none; opacity:0; transform:translateY(-2px); transition:opacity .15s ease, transform .15s ease;
+        position:absolute; left:0; bottom:-1.35em; /* ←下側に配置 */
+        font-size:10px; line-height:1; background:#0008; padding:2px 4px; border-radius:4px; color:#eff7ff;
+        white-space:nowrap; pointer-events:none; opacity:0; transform:translateY(2px); transition:opacity .15s ease, transform .15s ease;
+        z-index:10;
       }
       ruby.tok:hover rt{opacity:1; transform:translateY(0)}
-      /* rb 内の折り返し許可（横スクロール抑止） */
       ruby.tok rb{white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word}
 
-      /* 凡例 */
+      /* 凡例（min | bar | max の3カラム） */
       .legend{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
       .chip2{background:#223050; border:1px solid #2b3c61; padding:3px 8px; border-radius:999px; color:#9db1d0; font-size:12px}
-      .legend-lit{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
-      .legend-lit .label{font-size:12px; color:#9db1d0}
-      .legend-lit .bar{
-        width:260px; height:10px; border-radius:999px; border:1px solid #2b3c61; background:#1a2746; box-shadow: inset 0 0 0 1px #12203b;
+      .legend-lit{
+        display:grid;
+        grid-template-columns:auto 1fr auto;
+        align-items:center;
+        gap:8px;
+        min-width:320px;
       }
-      .legend-lit .scale{display:flex; justify-content:space-between; font-size:10px; color:#8aa4c7; margin-top:2px}
+      .legend-lit .scale{font-size:10px; color:#8aa4c7}
+      .legend-lit .bar{
+        width:100%; height:10px; border-radius:999px; border:1px solid #2b3c61; background:#1a2746; box-shadow: inset 0 0 0 1px #12203b;
+      }
     </style>
   </head>
   <body>
@@ -137,7 +158,7 @@
       <!-- 上段 -->
       <div class="row" id="row-top">
         <div class="panel" id="pane-io">
-          <h2>入力とオプション</h2>
+          <h2 class="h2bar"><span>入力とオプション</span></h2>
 
           <!-- ツールバー（テキスト付き） -->
           <div class="toolbar" id="toolbar">
@@ -160,10 +181,8 @@
               <span class="text">読み込み / DD</span>
             </button>
             <span class="sep"></span>
-            <!-- 生DEFLATE: デフォルトON -->
             <input id="rawMode" type="checkbox" checked />
             <label for="rawMode" class="small">生DEFLATE</label>
-
             <span class="sep"></span>
             <button id="btn-share" class="btn" title="URLを共有">
               <svg viewBox="0 0 24 24"><path d="M18 8a3 3 0 1 0-2.83-4H12v2h3.17A3 3 0 0 0 18 8zm-3 8H8a3 3 0 1 0 0 2h7v2l4-3-4-3v2zM12 10H8v2h4v2l4-3-4-3v2z"/></svg>
@@ -186,7 +205,7 @@
         </div>
 
         <div class="panel" id="pane-blocks">
-          <h2>ブロック情報（要約 + 長さ別シンボル表）</h2>
+          <h2 class="h2bar"><span>ブロック情報（要約 + 長さ別シンボル表）</span></h2>
           <div id="blocksScroll"><div id="blocks" class="blocks"></div></div>
           <div id="zlibNote" class="small muted" style="padding:6px 12px"></div>
         </div>
@@ -195,7 +214,14 @@
       <!-- 下段 -->
       <div class="row" id="row-bottom">
         <div class="panel" id="pane-editor">
-          <h2>エディタ (Python, 変更で即Zopfli圧縮)</h2>
+          <h2 class="h2bar">
+            <span>エディタ (Python, 変更で即Zopfli圧縮)</span>
+            <div id="iterControls" class="ctl">
+              <label for="iter">Zopfli iterations(故障中):</label>
+              <input id="iter" type="range" min="1" max="50" step="1" value="10" disabled />
+              <span class="small mono" id="iterVal">10</span>
+            </div>
+          </h2>
           <div id="editorWrap">
             <div id="editor">def p(g):
  for u in range(len(g)):
@@ -214,21 +240,14 @@
      *t,=map(list,zip(*t[::-1]))
     return t</div>
           </div>
-          <!-- ★ エディタ直下に iterations スライダ -->
-          <div id="iterWrap">
-            <span class="label">Zopfli iterations:</span>
-            <input id="iter" type="range" min="1" max="50" step="1" value="10" />
-            <span class="small mono" id="iterVal">10</span>
-          </div>
         </div>
 
         <div class="panel" id="pane-viz">
-          <h2>可視化（トークン彩色 & ルビ注釈）</h2>
+          <h2 class="h2bar"><span>可視化（トークン彩色 & ルビ注釈）</span></h2>
           <div id="vizHeader">
             <div class="legend">
               <span class="chip2 small">ホバーで種別/パラメータ/ビット長</span>
               <div class="legend-lit" aria-label="LITビット長スケール（緑=短, 赤=長）">
-                <span class="label small">LITビット長</span>
                 <div class="scale"><span id="litLegendMin">1b</span></div>
                 <div class="bar" id="litLegendBar" title="LIT token bit-length scale"></div>
                 <div class="scale"><span id="litLegendMax">9b</span></div>
