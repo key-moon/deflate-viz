@@ -3,7 +3,7 @@ import ace from "ace-builds/src-noconflict/ace";
 import "ace-builds/src-noconflict/mode-python";
 import "ace-builds/src-noconflict/theme-monokai";
 
-/* ここからは @gfx/wasm-zopfli を完全撤去し、zopfli_worker.mjs を動的インポートで使う */
+/* ここからは zopfli_worker を動的インポートで使う */
 type ZopfliFn = (input: Uint8Array, numIterations?: number) => Promise<Uint8Array>;
 let _zopfliFn: ZopfliFn | null = null;
 async function getZopfli(): Promise<ZopfliFn> {
@@ -252,7 +252,12 @@ function parseDeflate(allBytes: Uint8Array, isRaw = false) {
       if (sym<256){
         const tStart=out.length; out.push(sym);
         const txt=dec.decode(new Uint8Array([sym]));
-        tokens.push({type:'lit',text:txt,length:1,distance:null,bitsUsed:tokenBits,blockIndex,spanStart:tStart,spanEnd:tStart+1,bitStart:ldbg.decodedAt.start,bitEnd:ldbg.decodedAt.start+tokenBits,detail:`LIT`});
+        tokens.push({
+          type:'lit', text:txt, length:1, distance:null, bitsUsed:tokenBits,
+          blockIndex, spanStart:tStart, spanEnd:tStart+1,
+          bitStart:ldbg.decodedAt.start, bitEnd:ldbg.decodedAt.start+tokenBits,
+          detail:`LIT`, litCode: sym   // ← lit のコード値を保存
+        });
       } else if (sym===256){
         blocks.push(blockInfo);
         if (blockInfo.BFINAL) { break outer; }
@@ -269,7 +274,12 @@ function parseDeflate(allBytes: Uint8Array, isRaw = false) {
         const tStart=out.length;
         for (let i=0;i<length;i++){ const src=out.length-distance; if (src<0) throw new Error(`距離が出力境界を超過 dist=${distance} @block=${blockIndex}`); out.push(out[src]); }
         const seg=dec.decode(new Uint8Array(out.slice(tStart,tStart+length)));
-        tokens.push({type:'match',text:seg,length,distance,bitsUsed:tokenBits,blockIndex,spanStart:tStart,spanEnd:tStart+length,bitStart:ddbg.decodedAt?ddbg.decodedAt.start:(ldbg.decodedAt.start+dec2.bitsUsed),bitEnd:reader.tellBits(),detail:`MATCH`});
+        tokens.push({
+          type:'match', text:seg, length, distance, bitsUsed:tokenBits,
+          blockIndex, spanStart:tStart, spanEnd:tStart+length,
+          bitStart:ddbg.decodedAt?ddbg.decodedAt.start:(ldbg.decodedAt.start+dec2.bitsUsed),
+          bitEnd:reader.tellBits(), detail:`MATCH`
+        });
       }
     }
   }
@@ -300,8 +310,16 @@ function getMaxLitBits(blocks: BlockInfo[]): number {
 function litBgFor(bitlen: number, maxBits: number) {
   const denom = Math.max(1, maxBits - 1);
   const t = Math.max(0, Math.min(1, (bitlen - 1) / denom));
-  const hue = 120 - 120 * t;                  // 緑(120)→赤(0)
+  const hue = 120 - 120 * t;                  // 緑(短)→赤(長)
   const light = (bitlen % 2 === 0) ? 32 : 26; // 偶奇で明度差
+  return `hsl(${hue}deg 75% ${light}% / .55)`;
+}
+/** counts 用の同系グラデーション（最小>0〜最大） */
+function countBgFor(count: number, maxCount: number) {
+  const denom = Math.max(1, maxCount - 1);
+  const t = Math.max(0, Math.min(1, (count - 1) / denom));
+  const hue = 120 - 120 * t;
+  const light = (count % 2 === 0) ? 32 : 26;
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
 
@@ -322,16 +340,37 @@ function updateLitLegend(maxBits: number) {
   maxLab.textContent = `${maxBits}b`;
 }
 
-/* ======== 参照元ハイライト（MATCH ホバー）: 文字単位で太字＋色変更 ======== */
+/** 使用回数凡例（0〜maxCount）更新 */
+function updateCountLegend(maxCount: number) {
+  const bar = $("countLegendBar") as HTMLDivElement;
+  const minLab = $("countLegendMin") as HTMLSpanElement;
+  const maxLab = $("countLegendMax") as HTMLSpanElement;
+  const stops: string[] = [];
+  for (let c = 1; c <= Math.max(1, maxCount); c++) {
+    const color = countBgFor(c, Math.max(1, maxCount));
+    const p0 = ((c - 1) / Math.max(1, maxCount) * 100).toFixed(2) + "%";
+    const p1 = (c / Math.max(1, maxCount) * 100).toFixed(2) + "%";
+    stops.push(`${color} ${p0} ${p1}`);
+  }
+  bar.style.background = stops.length
+    ? `linear-gradient(to right, ${stops.join(", ")})`
+    : "linear-gradient(to right, #1a2746, #1a2746)";
+  minLab.textContent = "0";
+  maxLab.textContent = String(maxCount);
+}
+
+/* ======== 参照元ハイライト & 同一トークン断片の同時強調 ======== */
 function rangesOverlap(a0: number, a1: number, b0: number, b1: number) {
   return Math.max(a0, b0) < Math.min(a1, b1);
 }
 function clearHighlights(container: HTMLElement) {
   container.querySelectorAll<HTMLElement>('ruby.tok.ref-target').forEach(el => el.classList.remove('ref-target'));
+  container.querySelectorAll<HTMLElement>('ruby.tok.same-token').forEach(el => el.classList.remove('same-token'));
   container.querySelectorAll<HTMLElement>('.ch.refch').forEach(el => el.classList.remove('refch'));
 }
-function applyHighlight(container: HTMLElement, refStart: number, refEnd: number, target: HTMLElement) {
+function applyHighlight(container: HTMLElement, refStart: number, refEnd: number, tokenId: string) {
   clearHighlights(container);
+  // 参照元文字を強調
   const rubies = Array.from(container.querySelectorAll<HTMLElement>('ruby.tok'));
   for (const ruby of rubies) {
     const ss = parseInt(ruby.dataset.spanStart || "-1", 10);
@@ -343,82 +382,111 @@ function applyHighlight(container: HTMLElement, refStart: number, refEnd: number
         if (abs >= refStart && abs < refEnd) ch.classList.add('refch');
       });
     }
+    // 同一トークン（断片）を同時強調
+    if (ruby.dataset.tokenId === tokenId) ruby.classList.add('ref-target', 'same-token');
   }
-  target.classList.add('ref-target');
 }
 
-/** トークン描画（MATCH: 背景なし・枠線のみ）＋ data-* と char span 付与 */
-function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]) {
+/** トークン描画（分断対策: 断片クラス付与 & 同一トークン強調） */
+function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]): number {
   container.innerHTML = "";
   const maxLitBits = getMaxLitBits(blocks);
 
   for (let ti = 0; ti < tokens.length; ti++) {
     const t = tokens[ti];
+    const parts = (t.text || "").split("\n");
+    let carried = 0;
 
-    const createRuby = (textPart: string, partAbsStart: number) => {
+    for (let j = 0; j < parts.length; j++) {
+      const p = parts[j];
+      const absStart = (t.spanStart | 0) + carried;
+      const absEnd = absStart + p.length;
+
       const ruby = document.createElement("ruby");
       ruby.className = "tok";
+      ruby.dataset.type = t.type;
+      ruby.dataset.spanStart = String(absStart);
+      ruby.dataset.spanEnd   = String(absEnd);
+      ruby.dataset.tokenId   = String(ti);
+      ruby.dataset.partIndex = String(j);
+      ruby.dataset.partTotal = String(parts.length);
+
+      // 断片クラス
+      if (parts.length === 1) ruby.classList.add("frag-single");
+      else if (j === 0) ruby.classList.add("frag-start");
+      else if (j === parts.length - 1) ruby.classList.add("frag-end");
+      else ruby.classList.add("frag-mid");
+
+      // 色・枠
       if (t.type === "lit") {
         (ruby.style as any).background = litBgFor(t.bitsUsed || 1, maxLitBits);
         ruby.classList.add("lit");
       } else if (t.type === "match") {
-        ruby.classList.add("match"); // CSSで枠線のみ
-      } else {
-        (ruby.style as any).background = defaultBg(ti);
-        ruby.classList.add("raw");
-      }
-      ruby.dataset.type = t.type;
-      ruby.dataset.spanStart = String(t.spanStart ?? -1);
-      ruby.dataset.spanEnd   = String(t.spanEnd   ?? -1);
-
-      if (t.type === "match") {
+        ruby.classList.add("match");
         const refStart = Math.max(0, (t.spanStart | 0) - (t.distance | 0));
         const refLen = Math.max(0, Math.min(t.length | 0, t.distance | 0));
         const refEnd = refStart + refLen;
         ruby.dataset.refStart = String(refStart);
         ruby.dataset.refEnd = String(refEnd);
-        ruby.addEventListener("mouseenter", (ev) => {
-          const me = ev.currentTarget as HTMLElement;
-          const rs = parseInt(me.dataset.refStart || "-1", 10);
-          const re = parseInt(me.dataset.refEnd   || "-1", 10);
-          if (rs >= 0 && re > rs) applyHighlight(container, rs, re, me);
-        });
-        ruby.addEventListener("mouseleave", () => clearHighlights(container));
+      } else {
+        (ruby.style as any).background = defaultBg(ti);
+        ruby.classList.add("raw");
       }
 
+      // 文字（rb）は1文字ずつ span にし、絶対位置 data-abs を付ける
       const rb = document.createElement("rb");
-      for (let i = 0; i < textPart.length; i++) {
-        const span = document.createElement("span");
-        span.className = "ch";
-        span.dataset.abs = String(partAbsStart + i);
-        span.textContent = textPart[i];
-        rb.appendChild(span);
+      for (let i = 0; i < p.length; i++) {
+        const ch = document.createElement("span");
+        ch.className = "ch";
+        ch.dataset.abs = String(absStart + i);
+        ch.textContent = p[i];
+        rb.appendChild(ch);
       }
+
+      // ルビ（下側）
       const rt = document.createElement("rt");
       const head = t.type === 'lit' ? 'LIT' : t.type === 'match' ? 'MATCH' : 'RAW';
       rt.textContent = `${head} ${t.type==='match' ? `(L=${t.length},D=${t.distance})` : `(L=${t.length})`}  ${t.bitsUsed}b`;
-      ruby.append(rb, rt);
-      return ruby;
-    };
 
-    const parts = (t.text || "").split("\n");
-    let carried = 0;
-    parts.forEach((p: string, j: number) => {
-      if (p.length > 0) {
-        const absStart = (t.spanStart | 0) + carried;
-        container.appendChild(createRuby(p, absStart));
-        carried += p.length;
-      }
+      ruby.append(rb, rt);
+      container.appendChild(ruby);
+
+      // 同一トークン断片の同時強調
+      ruby.addEventListener("mouseenter", (ev) => {
+        const me = ev.currentTarget as HTMLElement;
+        const tokenId = me.dataset.tokenId!;
+        // まず同一トークン断片を強調
+        container.querySelectorAll<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`)
+          .forEach(el => el.classList.add("same-token"));
+        // MATCH の場合は参照元文字も強調
+        if (me.dataset.type === "match") {
+          const rs = parseInt(me.dataset.refStart || "-1", 10);
+          const re = parseInt(me.dataset.refEnd   || "-1", 10);
+          if (rs >= 0 && re > rs) applyHighlight(container, rs, re, tokenId);
+          else {
+            // 参照が変なら同一トークン表示のみ
+            me.classList.add('ref-target');
+          }
+        } else {
+          // LIT/RAW は断片強調のみ
+          me.classList.add('ref-target');
+        }
+      });
+      ruby.addEventListener("mouseleave", () => clearHighlights(container));
+
+      // 改行処理
       if (j < parts.length - 1) {
         container.appendChild(document.createTextNode("\n"));
-        carried += 1; // 改行分
       }
-    });
+      carried += p.length + (j < parts.length - 1 ? 1 : 0);
+    }
   }
+
   updateLitLegend(maxLitBits);
+  return maxLitBits;
 }
 
-/* ============================== ブロック要約＋レンジ表（ASCII注釈） ============================== */
+/* ============================== ブロック要約＋レンジ表＋コード/回数マップ ============================== */
 function escAsciiChar(code: number): string {
   const ch = String.fromCharCode(code);
   if (ch === "\\") return "\\\\";
@@ -430,7 +498,7 @@ function asciiAnnotationForRange(a: number, b: number): string {
   const hi = Math.min(0x7e, b);
   if (hi < 0x20 || lo > 0x7e) return "";
   if (lo === hi) return `'${escAsciiChar(lo)}'`;
-  return `'${escAsciiChar(lo)}'–'${escAsciiChar(hi)}'`;
+  return `'${escAsciiChar(hi)}' ? '${escAsciiChar(lo)}'–'${escAsciiChar(hi)}'`; // not used in new grid, kept for table
 }
 function rangesWithAscii(nums: number[], annotateForLiteralOnly: boolean) {
   if (nums.length === 0) return "";
@@ -443,7 +511,7 @@ function rangesWithAscii(nums: number[], annotateForLiteralOnly: boolean) {
       const loClamp = Math.max(0x20, start);
       const hiClamp = Math.min(0x7e, end);
       if (end >= 0 && start <= 255 && hiClamp >= loClamp) {
-        base += ` (${asciiAnnotationForRange(start, end)})`;
+        base += ` ('${String.fromCharCode(loClamp)}'–'${String.fromCharCode(hiClamp)}')`;
       }
     }
     out.push(base);
@@ -488,6 +556,26 @@ function makeLenTable(title: string, codeLengths?: number[], isLitLen = false) {
   wrap.appendChild(tbl);
   return wrap;
 }
+
+/** 0..128 の LIT 出現回数を数える（ブロック単位） */
+function countLitsForBlock(tokens: any[], blockIndex: number): number[] {
+  const cnt = new Array(129).fill(0);
+  for (const t of tokens) {
+    if (t.blockIndex !== blockIndex) continue;
+    if (t.type === "lit" && typeof t.litCode === "number" && t.litCode >= 0 && t.litCode <= 128) {
+      cnt[t.litCode]++;
+    }
+  }
+  return cnt;
+}
+/** 0..128 のビット長取得（無い=0） */
+function bitlenFor0to128(codeLengths?: number[]): number[] {
+  const out = new Array(129).fill(0);
+  if (!codeLengths) return out;
+  for (let i = 0; i <= 128; i++) out[i] = (codeLengths[i] | 0);
+  return out;
+}
+
 type BlockSummary = {
   index:number; type:string; final:boolean;
   headerBits:number; dynHeaderBits:number; padBits:number; lenNlenBits:number;
@@ -519,9 +607,57 @@ function summarizeBlocks(blocks: BlockInfo[], tokens: any[]): BlockSummary[] {
     };
   });
 }
-function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: any[]) {
+
+/** 0..128 を 64 文字×2段のグリッドで表示（背景は色、非printableは文字を出さない） */
+function makeCodeGrid(caption: string, values: number[], colorer: (v:number)=>string, presentMask: boolean[], showTextMask: boolean[]) {
+  const wrap = document.createElement("div");
+  const head = document.createElement("div");
+  head.textContent = caption;
+  (head.style as any).color = "#9db1d0";
+  (head.style as any).margin = "8px 0 6px";
+  wrap.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "codegrid"; // CSS 側で 64列グリッド
+  for (let i = 0; i <= 128; i++) {
+    const cell = document.createElement("div");
+    cell.className = "codecell";
+    const present = presentMask[i];
+    const showChar = showTextMask[i];
+    const v = values[i];
+
+    if (present && v > 0) {
+      (cell.style as any).background = colorer(v);
+    } else {
+      cell.classList.add("missing");
+    }
+
+    if (showChar) {
+      cell.textContent = String.fromCharCode(i);
+    } else {
+      cell.textContent = ""; // 印字しない
+    }
+
+    cell.title = `code ${i}${showChar ? ` ('${String.fromCharCode(i)}')` : ""} : ${present ? v : "n/a"}`;
+    grid.appendChild(cell);
+  }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: any[], maxLitBits: number) {
   sidebar.innerHTML = "";
   const summary = summarizeBlocks(blocks, tokens);
+
+  // counts 凡例更新（全ブロックでの最大値）
+  let globalMaxCount = 0;
+
+  for (const b of blocks) {
+    const cnt = countLitsForBlock(tokens, b.index);
+    globalMaxCount = Math.max(globalMaxCount, ...cnt);
+  }
+  updateCountLegend(globalMaxCount);
+
   for (const s of summary) {
     const base = blocks.find(b=>b.index===s.index)!;
     const card = document.createElement("div"); card.className="block";
@@ -541,8 +677,36 @@ function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: any[]) 
     note.textContent = `tokens ${s.tokens} (lit ${s.lit} / match ${s.match} / raw ${s.raw}), out ${s.outBytes} bytes`;
     card.appendChild(note);
 
+    // 既存：長さ別シンボル表
     if (base.trees.litLenCodeLengths) card.appendChild(makeLenTable(s.type==='FIXED'?'Lit/Len (fixed)':'Lit/Len', base.trees.litLenCodeLengths, true));
     if (base.trees.distCodeLengths)   card.appendChild(makeLenTable(s.type==='FIXED'?'Dist (fixed)':'Dist',     base.trees.distCodeLengths, false));
+
+    // 追加：0..128 ビット長ヒートマップ & 使用回数ヒートマップ
+    if (s.type !== 'RAW' && base.trees.litLenCodeLengths) {
+      const bitlens = bitlenFor0to128(base.trees.litLenCodeLengths);
+      const presentMask = bitlens.map(bl => bl > 0);
+      const showTextMask = Array.from({length:129}, (_,i)=> i>=0x20 && i<=0x7e);
+
+      const gridBits = makeCodeGrid(
+        "Literal 0–128 : bit-length heatmap",
+        bitlens,
+        (v)=>litBgFor(v, maxLitBits),
+        presentMask,
+        showTextMask
+      );
+      card.appendChild(gridBits);
+
+      const counts = countLitsForBlock(tokens, s.index);
+      const maxC = Math.max(0, ...counts);
+      const gridCounts = makeCodeGrid(
+        "Literal 0–128 : usage count heatmap",
+        counts,
+        (v)=>countBgFor(v, Math.max(1, globalMaxCount || maxC || 1)),
+        counts.map(c => c>0), // present: 使われたら着色
+        showTextMask
+      );
+      card.appendChild(gridCounts);
+    }
 
     sidebar.appendChild(card);
   }
@@ -588,7 +752,7 @@ async function zopfliCompressWithWorker(input: Uint8Array, raw: boolean, numIter
   return wrapZlib(deflateRaw, ad);
 }
 
-/* ============================== Ace Editor 初期化（フォント少しUP） ============================== */
+/* ============================== Ace Editor 初期化 ============================== */
 const editor = ace.edit("editor", {
   mode: "ace/mode/python",
   theme: "ace/theme/monokai",
@@ -617,8 +781,6 @@ const outDiv = $("output") as HTMLDivElement;
 const errDiv = $("error") as HTMLSpanElement;
 const okDiv = $("success") as HTMLSpanElement;
 const paneIO = $("pane-io") as HTMLDivElement;
-
-/* 見出し内 iterations スライダ */
 const elIter = $("iter") as HTMLInputElement;
 const elIterVal = $("iterVal") as HTMLSpanElement;
 
@@ -650,8 +812,8 @@ async function compressFromEditorAndVisualize() {
 
     // 解析して可視化
     const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(comp, raw);
-    renderOutput(outDiv, tokens, blocks);
-    renderBlocks(elBlocks, blocks, tokens);
+    const maxLitBits = renderOutput(outDiv, tokens, blocks);
+    renderBlocks(elBlocks, blocks, tokens, maxLitBits);
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
@@ -696,8 +858,8 @@ $("btn-parse")!.addEventListener("click", ()=>{
     else throw new Error("入力が空です。16進かBase64を指定してください。");
 
     const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(bytes, raw);
-    renderOutput(outDiv, tokens, blocks);
-    renderBlocks(elBlocks, blocks, tokens);
+    const maxLitBits = renderOutput(outDiv, tokens, blocks);
+    renderBlocks(elBlocks, blocks, tokens, maxLitBits);
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
@@ -755,8 +917,8 @@ async function handleFile(f: File){
     elHex.value = bytesToHex(buf);
     elB64.value = b64enc(buf);
     const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(buf, raw);
-    renderOutput(outDiv, tokens, blocks);
-    renderBlocks(elBlocks, blocks, tokens);
+    const maxLitBits = renderOutput(outDiv, tokens, blocks);
+    renderBlocks(elBlocks, blocks, tokens, maxLitBits);
     elZlibNote.textContent = zlib ? zlibNote : '';
 
     const decoded = dec.decode(outputBytes);
@@ -804,7 +966,7 @@ $("btn-share")!.addEventListener("click", async ()=>{
 /* ============================== URL復元（初期） ============================== */
 (function restoreFromURL(){
   const q = new URLSearchParams(location.search);
-  // デフォルト raw=1（指定があればそれを優先）
+  // 既定 raw=1（指定があればそれを優先）
   const rawParam = q.get("raw");
   const raw = rawParam ? (rawParam === "1") : true;
   elRaw.checked = raw;

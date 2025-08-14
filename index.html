@@ -9,7 +9,7 @@
         --bg:#0b1020; --panel:#121a2e; --ink:#e8f0ff; --muted:#9db1d0; --accent:#5ac8fa;
         --bad:#ff5e57; --ok:#32d74b; --chip:#223050;
         --blocks-height: 340px;
-        --refch:#5d1919; /* 参照中の文字色 */
+        --refch:#5d1919; /* ← 参照中の文字色（ご指定） */
       }
       *{box-sizing:border-box}
       body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";}
@@ -73,6 +73,29 @@
       .mono-small{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono"; font-size:12px}
       .wrap{word-break:break-word; white-space:normal}
 
+      /* 0..127 可視マップ */
+      .codegrid{
+        display:grid;
+        grid-template-columns: repeat(64, 1fr);
+        gap:1px;
+        background:#12203b;
+        border:1px solid #2b3c61;
+        border-radius:8px;
+        padding:4px;
+        margin-top:6px;
+      }
+      .codecell{
+        font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono";
+        font-size:10px;
+        line-height:1.6;
+        text-align:center;
+        border-radius:3px;
+        color:#e6f1ff;
+        min-height:16px;
+        user-select:text;
+      }
+      .codecell.missing{ color:#7a8aa0; background:transparent; }
+
       /* エディタ */
       #editorWrap{height:100%; display:flex; flex-direction:column;}
       #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px}
@@ -101,17 +124,29 @@
       ruby.tok.raw{ /* JSで背景色を付与 */ }
       ruby.tok.match{
         background:transparent !important; /* 塗りなし */
-        border:1px solid #3349b8;          /* 縁取り（ご指定） */
+        border:1px solid #3349b8;       /* 縁取り */
         padding:0 .5px; border-radius:6px;
         box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
+      }
+
+      /* 改行分断時の境界調整（角丸とボーダーを内側で消す） */
+      ruby.tok.match.frag-mid{ border:none; border-radius:0; box-shadow:none; }
+      ruby.tok.match.frag-start{ border-right:none; border-top-right-radius:0; border-bottom-right-radius:0; }
+      ruby.tok.match.frag-end{ border-left:none; border-top-left-radius:0; border-bottom-left-radius:0; }
+      ruby.tok.frag-mid{ border-radius:0; } /* LIT/RAWは枠が無いが角丸だけ揃える */
+
+      /* 同一トークン断片の同時強調 */
+      ruby.tok.same-token{
+        outline:1px solid rgba(90,200,250,.35);
+        outline-offset:1px;
       }
 
       /* 参照元ハイライト（文字単位） */
       .ch{white-space:pre;}
       .ch.refch{
         font-weight:700;
-        color:var(--refch);
-        text-shadow: 0 0 0.5px rgba(255,255,255,.05);
+        color:var(--refch); /* ← ご指定の色に */
+        text-shadow: 0 0 0.5px rgba(255,255,255,.25);
       }
       ruby.tok.ref-target{
         box-shadow: inset 0 0 0 2px #3349b8, 0 0 0 2px rgba(51,73,184,.25);
@@ -205,7 +240,14 @@
         </div>
 
         <div class="panel" id="pane-blocks">
-          <h2 class="h2bar"><span>ブロック情報（要約 + 長さ別シンボル表）</span></h2>
+          <h2 class="h2bar">
+            <span>ブロック情報（要約 + 0–127 ヒートマップ + 長さ別シンボル表）</span>
+            <div class="legend-lit" aria-label="使用回数スケール（小=赤, 大=緑）">
+              <div class="scale small">count</div>
+              <div class="bar" id="countLegendBar" title="Usage count scale"></div>
+              <div class="scale"><span id="countLegendMin" class="small">0</span>–<span id="countLegendMax" class="small">0</span></div>
+            </div>
+          </h2>
           <div id="blocksScroll"><div id="blocks" class="blocks"></div></div>
           <div id="zlibNote" class="small muted" style="padding:6px 12px"></div>
         </div>
@@ -217,8 +259,8 @@
           <h2 class="h2bar">
             <span>エディタ (Python, 変更で即Zopfli圧縮)</span>
             <div id="iterControls" class="ctl">
-              <label for="iter">Zopfli iterations(故障中):</label>
-              <input id="iter" type="range" min="1" max="50" step="1" value="10" disabled />
+              <label for="iter">Zopfli iterations:</label>
+              <input id="iter" type="range" min="1" max="50" step="1" value="10" />
               <span class="small mono" id="iterVal">10</span>
             </div>
           </h2>
@@ -246,7 +288,7 @@
           <h2 class="h2bar"><span>可視化（トークン彩色 & ルビ注釈）</span></h2>
           <div id="vizHeader">
             <div class="legend">
-              <span class="chip2 small">ホバーで種別/パラメータ/ビット長</span>
+              <span class="chip2 small">ホバーで種別/パラメータ/ビット長・参照先</span>
               <div class="legend-lit" aria-label="LITビット長スケール（緑=短, 赤=長）">
                 <div class="scale"><span id="litLegendMin">1b</span></div>
                 <div class="bar" id="litLegendBar" title="LIT token bit-length scale"></div>
