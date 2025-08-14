@@ -51,12 +51,6 @@
       }
       textarea{height:64px; resize:vertical}
 
-      /* スライダー */
-      .slider{
-        display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 10px; border-radius:8px; border:1px solid #243151; background:#0f1527; color:var(--ink);
-      }
-      .slider input[type="range"]{ width:140px; height:4px; }
-
       /* ドラッグ&ドロップ */
       #pane-io.drop{outline:2px dashed var(--accent); outline-offset:-6px; box-shadow: inset 0 0 0 9999px rgba(90,200,250,.08);}
 
@@ -81,17 +75,42 @@
       #editorWrap{height:100%; display:flex; flex-direction:column;}
       #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px}
 
-      /* 可視化（スクロール可能に） */
+      /* エディタ直下の iterations スライダ */
+      #iterWrap{display:flex; align-items:center; gap:10px; padding:8px 12px 12px; border-top:1px solid rgba(255,255,255,.06)}
+      #iterWrap .label{font-size:12px; color:#9db1d0}
+      #iter{width:200px; height:4px;}
+      #iterVal{min-width:2ch; display:inline-block}
+
+      /* 可視化（縦スクロールのみ、横禁止） */
       #pane-viz{display:flex; flex-direction:column; min-height:0;}
       #vizHeader{padding:0 12px 8px;}
-      #vizScroll{flex:1 1 auto; overflow:auto; padding:10px 12px; min-height:0;}
-      .viz{white-space:pre-wrap; word-wrap:anywhere; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono","Noto Sans Mono",Consolas,"Liberation Mono";}
+      #vizScroll{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:10px 12px; min-height:0;}
+      .viz{
+        white-space:pre-wrap; /* 改行保持＋折り返し */
+        overflow-wrap:anywhere; /* 横スクロール禁止のため強制折り返し */
+        word-break:break-word;
+        max-width:100%;
+        font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono","Noto Sans Mono",Consolas,"Liberation Mono";
+      }
+
+      /* トークン（MATCH は縁取りのみ） */
       ruby.tok{position:relative; display:inline-block; border-radius:6px; padding:0 .5px}
+      ruby.tok.lit{ /* LIT: 背景はJS側でセット */ }
+      ruby.tok.raw{ /* RAW: 背景はJS側でセット */ }
+      ruby.tok.match{
+        background:transparent !important; /* 塗りなし */
+        border:1px solid #3349b8;       /* 縁取り */
+        padding:0 .5px; border-radius:6px;
+        box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
+      }
+      /* ルビ */
       ruby.tok rt{
         position:absolute; top:-1.35em; left:0; font-size:10px; line-height:1; background:#0008; padding:2px 4px; border-radius:4px; color:#eff7ff;
         white-space:nowrap; pointer-events:none; opacity:0; transform:translateY(-2px); transition:opacity .15s ease, transform .15s ease;
       }
       ruby.tok:hover rt{opacity:1; transform:translateY(0)}
+      /* rb 内の折り返し許可（横スクロール抑止） */
+      ruby.tok rb{white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word}
 
       /* 凡例 */
       .legend{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
@@ -141,16 +160,9 @@
               <span class="text">読み込み / DD</span>
             </button>
             <span class="sep"></span>
-            <input id="rawMode" type="checkbox" />
+            <!-- 生DEFLATE: デフォルトON -->
+            <input id="rawMode" type="checkbox" checked />
             <label for="rawMode" class="small">生DEFLATE</label>
-
-            <!-- 追加: numIterations スライダー -->
-            <span class="sep"></span>
-            <label class="slider" title="Zopfli繰り返し回数（高いほど高圧縮・遅い）">
-              <span class="small">iterations:</span>
-              <input id="iter" type="range" min="1" max="50" step="1" value="10" />
-              <span class="small mono" id="iterVal">10</span>
-            </label>
 
             <span class="sep"></span>
             <button id="btn-share" class="btn" title="URLを共有">
@@ -202,6 +214,12 @@
      *t,=map(list,zip(*t[::-1]))
     return t</div>
           </div>
+          <!-- ★ エディタ直下に iterations スライダ -->
+          <div id="iterWrap">
+            <span class="label">Zopfli iterations:</span>
+            <input id="iter" type="range" min="1" max="50" step="1" value="10" />
+            <span class="small mono" id="iterVal">10</span>
+          </div>
         </div>
 
         <div class="panel" id="pane-viz">
@@ -209,15 +227,15 @@
           <div id="vizHeader">
             <div class="legend">
               <span class="chip2 small">ホバーで種別/パラメータ/ビット長</span>
-              <!-- 追加: LIT の色の凡例 -->
               <div class="legend-lit" aria-label="LITビット長スケール（緑=短, 赤=長）">
                 <span class="label small">LITビット長</span>
+                <div class="scale"><span id="litLegendMin">1b</span></div>
                 <div class="bar" id="litLegendBar" title="LIT token bit-length scale"></div>
-                <div class="scale"><span id="litLegendMin">1b</span><span id="litLegendMax">9b</span></div>
+                <div class="scale"><span id="litLegendMax">9b</span></div>
               </div>
             </div>
           </div>
-          <!-- スクロール領域 -->
+          <!-- スクロール領域（縦のみ） -->
           <div id="vizScroll">
             <div id="output" class="viz"></div>
           </div>

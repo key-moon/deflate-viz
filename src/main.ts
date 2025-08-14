@@ -15,7 +15,7 @@ async function getZopfli(): Promise<ZopfliFn> {
     if (scriptUrl.host.endsWith("github.io")) {
       base = scriptUrl.pathname.split('/').slice(0, 2).join('/') + '/';
     }
-    // プロジェクトに置いた Worker ラッパ（GZIPを返す想定）
+    // リポ内の Worker ラッパ（GZIPを返す想定）
     const mod: any = await import(`${base}gzip_zopfli_worker.mjs`);
     if (!mod || typeof mod.zopfli !== "function") {
       throw new Error("zopfli_worker.mjs の読み込みに失敗（zopfliが見つかりません）");
@@ -310,7 +310,6 @@ function updateLitLegend(maxBits: number) {
   const bar = $("litLegendBar") as HTMLDivElement;
   const minLab = $("litLegendMin") as HTMLSpanElement;
   const maxLab = $("litLegendMax") as HTMLSpanElement;
-  // 1..maxBits の各区間に色を割り付けた線形グラデを構成
   const stops: string[] = [];
   for (let b = 1; b <= maxBits; b++) {
     const color = litBgFor(b, maxBits);
@@ -323,18 +322,31 @@ function updateLitLegend(maxBits: number) {
   maxLab.textContent = `${maxBits}b`;
 }
 
+/** トークン描画（MATCH は縁取りのみ・背景なし） */
 function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]) {
   container.innerHTML = "";
   const maxLitBits = getMaxLitBits(blocks);
   for (let ti = 0; ti < tokens.length; ti++) {
     const t = tokens[ti];
-    const isLit = t.type === "lit";
-    const color = isLit ? litBgFor(t.bitsUsed || 1, maxLitBits) : defaultBg(ti);
     const parts = t.text.split("\n");
     parts.forEach((p: string, j: number) => {
       if (p.length > 0) {
-        const ruby = document.createElement("ruby"); ruby.className="tok"; (ruby.style as any).background=color;
-        const rb=document.createElement("rb"); rb.textContent=p;
+        const ruby = document.createElement("ruby");
+        ruby.className = "tok";
+        // クラス割当と色
+        if (t.type === "lit") {
+          (ruby.style as any).background = litBgFor(t.bitsUsed || 1, maxLitBits);
+          ruby.classList.add("lit");
+        } else if (t.type === "match") {
+          // 背景は付けない・枠線のみ（CSS側で制御）
+          ruby.classList.add("match");
+        } else {
+          // RAW は既定の淡い塗り
+          (ruby.style as any).background = defaultBg(ti);
+          ruby.classList.add("raw");
+        }
+        const rb=document.createElement("rb");
+        rb.textContent=p;
         const rt=document.createElement("rt");
         const head=t.type==='lit'?'LIT':t.type==='match'?'MATCH':'RAW';
         rt.textContent=`${head} ${t.type==='match' ? `(L=${t.length},D=${t.distance})` : `(L=${t.length})`}  ${t.bitsUsed}b`;
@@ -521,7 +533,7 @@ async function zopfliCompressWithWorker(input: Uint8Array, raw: boolean, numIter
 const editor = ace.edit("editor", {
   mode: "ace/mode/python",
   theme: "ace/theme/monokai",
-  fontSize: "15px",           // ← 少し大きく
+  fontSize: "15px",           // 少し大きく
   showPrintMargin: false,
   wrap: true,
   useWorker: false
@@ -547,7 +559,7 @@ const errDiv = $("error") as HTMLSpanElement;
 const okDiv = $("success") as HTMLSpanElement;
 const paneIO = $("pane-io") as HTMLDivElement;
 
-/* 追加: numIterations スライダー */
+/* エディタ下の iterations スライダ */
 const elIter = $("iter") as HTMLInputElement;
 const elIterVal = $("iterVal") as HTMLSpanElement;
 
@@ -555,9 +567,14 @@ const setErr = (m: string) => { errDiv.textContent = m; errDiv.classList.remove(
 const setOk  = (m: string) => { okDiv .textContent = m; okDiv .classList.remove("hidden"); errDiv.classList.add("hidden"); };
 const clearMsgs=()=>{ errDiv.classList.add("hidden"); errDiv.textContent=''; okDiv.classList.add("hidden"); okDiv.textContent=''; };
 
+/* ============================== エディタ同期（再帰抑止） ============================== */
+let isProgrammaticEditorUpdate = false;
+let lastCompressedB64: string | null = null;
+
 /* ============================== 圧縮→可視化 ============================== */
 let compressTimer: number | null = null as any;
 async function compressFromEditorAndVisualize() {
+  if (isProgrammaticEditorUpdate) return; // プログラム更新中はスキップ
   clearMsgs();
   try{
     const text = editor.getValue();
@@ -566,14 +583,30 @@ async function compressFromEditorAndVisualize() {
     const iters = Math.max(1, Math.min(1000, parseInt(elIter.value || "10", 10) || 10));
 
     const comp = await zopfliCompressWithWorker(input, raw, iters);
-    elHex.value = bytesToHex(comp);
-    elB64.value = b64enc(comp);
+    const compB64 = b64enc(comp);
 
+    // 入力欄に反映
+    elHex.value = bytesToHex(comp);
+    elB64.value = compB64;
+
+    // 解析して可視化
     const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(comp, raw);
     renderOutput(outDiv, tokens, blocks);
     renderBlocks(elBlocks, blocks, tokens);
     elZlibNote.textContent = zlib ? zlibNote : '';
+
     const decoded = dec.decode(outputBytes);
+
+    // ★ 圧縮バイト列が「変化した」場合のみ、エディタを更新（再帰抑止）
+    if (lastCompressedB64 !== compB64) {
+      lastCompressedB64 = compB64;
+      if (editor.getValue() !== decoded) {
+        isProgrammaticEditorUpdate = true;
+        editor.setValue(decoded, -1); // カーソル移動なし
+        isProgrammaticEditorUpdate = false;
+      }
+    }
+
     setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length}`);
   }catch(e:any){
     console.error(e);
@@ -583,14 +616,17 @@ async function compressFromEditorAndVisualize() {
 const debounceCompress = ()=>{ if (compressTimer) clearTimeout(compressTimer); compressTimer = window.setTimeout(compressFromEditorAndVisualize, 300); };
 
 /* エディタ変更/トグル変更/イテレーション変更で再圧縮 */
-(editor.session as any).on("change", debounceCompress);
+(editor.session as any).on("change", ()=>{
+  if (isProgrammaticEditorUpdate) return;
+  debounceCompress();
+});
 elRaw.addEventListener("change", debounceCompress);
 elIter.addEventListener("input", ()=>{
   elIterVal.textContent = String(elIter.value);
   debounceCompress();
 });
 
-/* ============================== 入力→解析（既存どおり） ============================== */
+/* ============================== 入力→解析（手動解析ボタン） ============================== */
 $("btn-parse")!.addEventListener("click", ()=>{
   clearMsgs();
   try{
@@ -604,7 +640,19 @@ $("btn-parse")!.addEventListener("click", ()=>{
     renderOutput(outDiv, tokens, blocks);
     renderBlocks(elBlocks, blocks, tokens);
     elZlibNote.textContent = zlib ? zlibNote : '';
+
     const decoded = dec.decode(outputBytes);
+    // 解析からの可視化更新時には lastCompressedB64 を保持（ここでは未更新の場合もある）
+    const nowB64 = b64enc(bytes);
+    if (lastCompressedB64 !== nowB64) lastCompressedB64 = nowB64;
+
+    // 手動解析でもエディタ内容を同期（再帰抑止）
+    if (editor.getValue() !== decoded) {
+      isProgrammaticEditorUpdate = true;
+      editor.setValue(decoded, -1);
+      isProgrammaticEditorUpdate = false;
+    }
+
     setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length}`);
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 });
@@ -613,6 +661,7 @@ $("btn-parse")!.addEventListener("click", ()=>{
 $("btn-sample")!.addEventListener("click", ()=>{
   elHex.value="78 9c f3 48 cd c9 c9 57 28 cf 2f ca 49 01 00 1b 15 04 5d";
   elB64.value="eJzzSM3JyVcozy/KSQEAUw==";
+  // サンプルは zlib なので raw を明示的にオフ
   elRaw.checked=false;
   $("btn-parse")!.click();
 });
@@ -653,7 +702,16 @@ async function handleFile(f: File){
     renderOutput(outDiv, tokens, blocks);
     renderBlocks(elBlocks, blocks, tokens);
     elZlibNote.textContent = zlib ? zlibNote : '';
+
     const decoded = dec.decode(outputBytes);
+    // ファイル読込時もエディタを同期
+    if (editor.getValue() !== decoded) {
+      isProgrammaticEditorUpdate = true;
+      editor.setValue(decoded, -1);
+      isProgrammaticEditorUpdate = false;
+    }
+
+    lastCompressedB64 = b64enc(buf);
     setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length} / ファイル: ${f.name}`);
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 }
@@ -691,7 +749,9 @@ $("btn-share")!.addEventListener("click", async ()=>{
 /* ============================== URL復元（初期） ============================== */
 (function restoreFromURL(){
   const q = new URLSearchParams(location.search);
-  const raw = q.get("raw") === "1";
+  // ★ デフォルト raw=1。URLに raw があるときはそれを優先。
+  const rawParam = q.get("raw");
+  const raw = rawParam ? (rawParam === "1") : true;
   elRaw.checked = raw;
 
   const t = q.get("text");   // 平文（UTF-8 Base64）
@@ -699,7 +759,10 @@ $("btn-share")!.addEventListener("click", async ()=>{
   if (t){
     try{
       const text = decodeURIComponent(escape(atob(t)));
+      isProgrammaticEditorUpdate = true;
       editor.setValue(text, -1);
+      isProgrammaticEditorUpdate = false;
+      elIterVal.textContent = String(elIter.value || "10");
       debounceCompress();
       return;
     }catch(e){ console.warn("text デコード失敗", e); }
@@ -709,6 +772,7 @@ $("btn-share")!.addEventListener("click", async ()=>{
       const bytes = b64dec(d);
       elB64.value = d;
       elHex.value = bytesToHex(bytes);
+      lastCompressedB64 = d;
       $("btn-parse")!.click();
       return;
     }catch(e){ console.warn("deflate デコード失敗", e); }
