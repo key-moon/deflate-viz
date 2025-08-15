@@ -69,10 +69,10 @@ class HuffmanLSB {
   }
 }
 
-const LEN_BASE=[3,4,5,6,7,8,9,10, 11,13,15,17, 19,23,27,31, 35,43,51,59, 67,83,99,115, 131,163,195,227, 259];
-const LEN_EXTRA=[0,0,0,0,0,0,0,0, 1,1,1,1, 2,2,2,2, 3,3,3,3, 4,4,4,4, 5,5,5,5, 0];
-const DIST_BASE=[1,2,3,4, 5,7, 9,13, 17,25, 33,49, 65,97, 129,193, 257,385, 513,769, 1025,1537, 2049,3073, 4097,6145, 8193,12289, 16385,24577];
-const DIST_EXTRA=[0,0,0,0, 1,1, 2,2, 3,3, 4,4, 5,5, 6,6, 7,7, 8,8, 9,9, 10,10, 11,11, 12,12, 13,13];
+export const LEN_BASE=[3,4,5,6,7,8,9,10, 11,13,15,17, 19,23,27,31, 35,43,51,59, 67,83,99,115, 131,163,195,227, 259];
+export const LEN_EXTRA=[0,0,0,0,0,0,0,0, 1,1,1,1, 2,2,2,2, 3,3,3,3, 4,4,4,4, 5,5,5,5, 0];
+export const DIST_BASE=[1,2,3,4, 5,7, 9,13, 17,25, 33,49, 65,97, 129,193, 257,385, 513,769, 1025,1537, 2049,3073, 4097,6145, 8193,12289, 16385,24577];
+export const DIST_EXTRA=[0,0,0,0, 1,1, 2,2, 3,3, 4,4, 5,5, 6,6, 7,7, 8,8, 9,9, 10,10, 11,11, 12,12, 13,13];
 const CODELEN_CODE_ORDER=[16,17,18, 0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
 
 function parseMaybeZlibHeader(bytes: Uint8Array) {
@@ -216,18 +216,19 @@ export function parseDeflate(allBytes: Uint8Array, isRaw = false) {
         blockIndex++; break;
       } else {
         if (sym>285) throw new Error(`不正な長さ符号 sym=${sym} @block=${blockIndex}`);
-        let length:number;
+        let length:number; let lenExtraBits=0; const lenCodeBits=dec2.bitsUsed;
         if (sym===285){ length=258; }
-        else { const idx=sym-257; const base=LEN_BASE[idx]; const extra=LEN_EXTRA[idx]; const ext=extra?reader.readBits(extra):0; tokenBits+=extra; length=base+ext; }
-        const ddbg:any={}; const ddec=dist.decode(reader, ddbg); const dsym=ddec.symbol; tokenBits+=ddec.bitsUsed;
+        else { const idx=sym-257; const base=LEN_BASE[idx]; const extra=LEN_EXTRA[idx]; const ext=extra?reader.readBits(extra):0; tokenBits+=extra; lenExtraBits=extra; length=base+ext; }
+        const ddbg:any={}; const ddec=dist.decode(reader, ddbg); const dsym=ddec.symbol; tokenBits+=ddec.bitsUsed; const distCodeBits=ddec.bitsUsed;
         if (dsym>29) throw new Error(`不正な距離符号 dsym=${dsym} @block=${blockIndex}`);
-        const dbase=DIST_BASE[dsym]; const dextra=DIST_EXTRA[dsym]; const dval=dextra?reader.readBits(dextra):0; tokenBits+=dextra;
+        const dbase=DIST_BASE[dsym]; const dextra=DIST_EXTRA[dsym]; const dval=dextra?reader.readBits(dextra):0; tokenBits+=dextra; const distExtraBits=dextra;
         const distance=dbase+dval;
         const tStart=out.length;
         for (let i=0;i<length;i++){ const src=out.length-distance; if (src<0) throw new Error(`距離が出力境界を超過 dist=${distance} @block=${blockIndex}`); out.push(out[src]); }
         const seg=dec.decode(new Uint8Array(out.slice(tStart,tStart+length)));
         tokens.push({
           type:'match', text:seg, length, distance, bitsUsed:tokenBits,
+          lenCodeBits, lenExtraBits, distCodeBits, distExtraBits,
           blockIndex, spanStart:tStart, spanEnd:tStart+length,
           bitStart:ddbg.decodedAt?ddbg.decodedAt.start:(ldbg.decodedAt.start+dec2.bitsUsed),
           bitEnd:reader.tellBits(), detail:`MATCH`
