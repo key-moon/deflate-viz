@@ -1,4 +1,5 @@
 import type { BlockInfo } from "./parser";
+import { LEN_BASE, LEN_EXTRA, DIST_BASE, DIST_EXTRA } from "./parser";
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -66,6 +67,7 @@ function clearHighlights(container: HTMLElement) {
   container.querySelectorAll<HTMLElement>('ruby.tok.same-token').forEach(el => el.classList.remove('same-token'));
   container.querySelectorAll<HTMLElement>('ruby.tok.hit').forEach(el => el.classList.remove('hit'));
   container.querySelectorAll<HTMLElement>('.ch.refch').forEach(el => el.classList.remove('refch'));
+  clearHeatmapHighlights();
 }
 function applyHighlight(container: HTMLElement, refStart: number, refEnd: number, tokenId: string) {
   const rubies = Array.from(container.querySelectorAll<HTMLElement>('ruby.tok'));
@@ -83,34 +85,54 @@ function applyHighlight(container: HTMLElement, refStart: number, refEnd: number
   }
 }
 
-/* ======== クリック固定ハイライト（トークン／コードセル） ======== */
-let locked = false;
+/* ======== ハイライト（トークン／コードセル） ======== */
 export function lockClear(container: HTMLElement) {
-  locked = false;
   clearHighlights(container);
 }
-export function lockToken(container: HTMLElement, tokenId: string, type: string) {
-  locked = true;
-  container.querySelectorAll<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`)
-    .forEach(el => el.classList.add("same-token","hit","ref-target"));
-  if (type === "match") {
-    const any = container.querySelector<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`);
-    if (any) {
-      const rs = parseInt(any.dataset.refStart || "-1", 10);
-      const re = parseInt(any.dataset.refEnd   || "-1", 10);
-      if (rs >= 0 && re > rs) applyHighlight(container, rs, re, tokenId);
-    }
-  }
+function clearHeatmapHighlights() {
+  document.querySelectorAll<HTMLElement>('.codecell.hit').forEach(el=>el.classList.remove('hit'));
 }
-export function lockLitByCode(container: HTMLElement, code: number, blockIndex: number|null = null) {
-  locked = true;
+function highlightLitCells(code:number) {
+  document.querySelectorAll<HTMLElement>(`.codecell[data-lit="${code}"]`).forEach(el=>el.classList.add('hit'));
+}
+function highlightRangeCells(type:'len'|'dist', min:number, max:number) {
+  document.querySelectorAll<HTMLElement>(`.codecell[data-type="${type}"]`).forEach(el=>{
+    const f=parseInt(el.dataset.from||'0',10);
+    const t=parseInt(el.dataset.to||'0',10);
+    if(Math.max(f,min) <= Math.min(t,max)) el.classList.add('hit');
+  });
+}
+function highlightLitByCode(container: HTMLElement, code: number, blockIndex: number|null = null) {
   clearHighlights(container);
   const sel = blockIndex==null
     ? `ruby.tok.lit[data-lit="${code}"]`
     : `ruby.tok.lit[data-lit="${code}"][data-block-index="${blockIndex}"]`;
   container.querySelectorAll<HTMLElement>(sel).forEach(el=>{
-    el.classList.add("hit","same-token","ref-target");
+    el.classList.add('hit','same-token','ref-target');
   });
+  highlightLitCells(code);
+}
+function highlightLengthRange(container: HTMLElement, min: number, max: number, blockIndex: number|null = null) {
+  clearHighlights(container);
+  const sel = blockIndex==null
+    ? `ruby.tok.match`
+    : `ruby.tok.match[data-block-index="${blockIndex}"]`;
+  container.querySelectorAll<HTMLElement>(sel).forEach(el=>{
+    const len=parseInt(el.dataset.length||'0',10);
+    if(len>=min && len<=max) el.classList.add('hit','same-token','ref-target');
+  });
+  highlightRangeCells('len', min, max);
+}
+function highlightDistanceRange(container: HTMLElement, min: number, max: number, blockIndex: number|null = null) {
+  clearHighlights(container);
+  const sel = blockIndex==null
+    ? `ruby.tok.match`
+    : `ruby.tok.match[data-block-index="${blockIndex}"]`;
+  container.querySelectorAll<HTMLElement>(sel).forEach(el=>{
+    const dist=parseInt(el.dataset.distance||'0',10);
+    if(dist>=min && dist<=max) el.classList.add('hit','same-token','ref-target');
+  });
+  highlightRangeCells('dist', min, max);
 }
 
 /* ============================== トークン描画 ============================== */
@@ -154,6 +176,8 @@ export function renderOutput(container: HTMLElement, tokens: any[], blocks: Bloc
         const refEnd = refStart + refLen;
         ruby.dataset.refStart = String(refStart);
         ruby.dataset.refEnd = String(refEnd);
+        ruby.dataset.length = String(t.length);
+        ruby.dataset.distance = String(t.distance);
       } else {
         (ruby.style as any).background = defaultBg(ti);
         ruby.classList.add("raw");
@@ -172,14 +196,22 @@ export function renderOutput(container: HTMLElement, tokens: any[], blocks: Bloc
       // ルビ（下側）
       const rt = document.createElement("rt");
       const head = t.type === 'lit' ? 'LIT' : t.type === 'match' ? 'MATCH' : 'RAW';
-      rt.textContent = `${head} ${t.type==='match' ? `(L=${t.length},D=${t.distance})` : `(L=${t.length})`}  ${t.bitsUsed}b`;
+      if (t.type === 'match') {
+        const lcb = t.lenCodeBits || 0;
+        const leb = t.lenExtraBits || 0;
+        const dcb = t.distCodeBits || 0;
+        const deb = t.distExtraBits || 0;
+        rt.textContent = `${head}(L=${t.length},D=${t.distance}) ${t.bitsUsed}b(${lcb}+${leb},${dcb}+${deb})`;
+      } else {
+        rt.textContent = `${head} (L=${t.length})  ${t.bitsUsed}b`;
+      }
 
       ruby.append(rb, rt);
       container.appendChild(ruby);
 
       // ホバー：同一トークン断片 + 参照（MATCH）
       ruby.addEventListener("mouseenter", (ev) => {
-        if (locked) return;
+        clearHighlights(container);
         const me = ev.currentTarget as HTMLElement;
         const tokenId = me.dataset.tokenId!;
         container.querySelectorAll<HTMLElement>(`ruby.tok[data-token-id="${tokenId}"]`)
@@ -189,19 +221,17 @@ export function renderOutput(container: HTMLElement, tokens: any[], blocks: Bloc
           const re = parseInt(me.dataset.refEnd   || "-1", 10);
           if (rs >= 0 && re > rs) applyHighlight(container, rs, re, tokenId);
           else me.classList.add('ref-target');
+          const len=parseInt(me.dataset.length||'0',10);
+          const dist=parseInt(me.dataset.distance||'0',10);
+          highlightRangeCells('len', len, len);
+          highlightRangeCells('dist', dist, dist);
         } else {
           me.classList.add('ref-target');
+          const lit=parseInt(me.dataset.lit||'0',10);
+          highlightLitCells(lit);
         }
       });
-      ruby.addEventListener("mouseleave", () => { if (!locked) clearHighlights(container); });
-
-      // クリック固定
-      ruby.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        const me = ev.currentTarget as HTMLElement;
-        clearHighlights(container);
-        lockToken(container, me.dataset.tokenId!, me.dataset.type || "");
-      });
+      ruby.addEventListener("mouseleave", () => { clearHighlights(container); });
 
       if (j < parts.length - 1) container.appendChild(document.createTextNode("\n"));
       carried += p.length + (j < parts.length - 1 ? 1 : 0);
@@ -226,19 +256,17 @@ function asciiAnnotationForRange(a: number, b: number): string {
   if (lo === hi) return `'${escAsciiChar(lo)}'`;
   return `'${escAsciiChar(lo)}'–'${escAsciiChar(hi)}'`;
 }
-function rangesWithAscii(nums: number[], annotateForLiteralOnly: boolean) {
+function rangesWithAscii(nums: number[]) {
   if (nums.length === 0) return "";
   const a = Array.from(new Set(nums)).sort((x,y)=>x-y);
   const out: string[] = [];
   let s = a[0], p = a[0];
   const push = (start: number, end: number) => {
     let base = (start === end) ? `${start}` : `${start}–${end}`;
-    if (annotateForLiteralOnly) {
-      const loClamp = Math.max(0x20, start);
-      const hiClamp = Math.min(0x7e, end);
-      if (end >= 0 && start <= 255 && hiClamp >= loClamp) {
-        base += ` (${asciiAnnotationForRange(start, end)})`;
-      }
+    const loClamp = Math.max(0x20, start);
+    const hiClamp = Math.min(0x7e, end);
+    if (end >= 0 && start <= 255 && hiClamp >= loClamp) {
+      base += ` (${asciiAnnotationForRange(start, end)})`;
     }
     out.push(base);
   };
@@ -248,6 +276,34 @@ function rangesWithAscii(nums: number[], annotateForLiteralOnly: boolean) {
   }
   push(s, p);
   return out.join(", ");
+}
+
+function symbolsWithHints(nums: number[], mode:'litlen'|'dist') {
+  if (nums.length === 0) return "";
+  if (mode === 'dist') {
+    return nums.sort((a,b)=>a-b).map(sym=>{
+      const base=DIST_BASE[sym]; const extra=DIST_EXTRA[sym];
+      const end=base + ((1<<extra) - 1);
+      const label = extra ? `${base}-${end}` : `${base}`;
+      return `${sym}(${label})`;
+    }).join(", ");
+  } else {
+    const lit = nums.filter(n=>n<=255);
+    const len = nums.filter(n=>n>=257);
+    const parts:string[]=[];
+    if (lit.length) parts.push(rangesWithAscii(lit));
+    if (len.length) {
+      const mapped=len.sort((a,b)=>a-b).map(sym=>{
+        if (sym===285) return `285(258)`;
+        const idx=sym-257; const base=LEN_BASE[idx]; const extra=LEN_EXTRA[idx];
+        const end=base + ((1<<extra) - 1);
+        const label = extra?`${base}-${end}`:`${base}`;
+        return `${sym}(${label})`;
+      }).join(", ");
+      parts.push(mapped);
+    }
+    return parts.join(", ");
+  }
 }
 function groupByLength(codeLengths?: number[]) {
   const map = new Map<number, number[]>();
@@ -262,7 +318,7 @@ function groupByLength(codeLengths?: number[]) {
 }
 
 /* ============================== makeLenTable ============================== */
-function makeLenTable(title: string, codeLengths?: number[], isLitLen = false) {
+function makeLenTable(title: string, codeLengths?: number[], mode:'litlen'|'dist') {
   const wrap = document.createElement("div");
   const head = document.createElement("div");
   head.textContent = title;
@@ -281,7 +337,7 @@ function makeLenTable(title: string, codeLengths?: number[], isLitLen = false) {
     const td1=document.createElement("td"); td1.textContent=String(len);
     const td2=document.createElement("td"); td2.textContent=String(syms.length);
     const td3=document.createElement("td"); td3.className="mono-small wrap";
-    td3.textContent = rangesWithAscii(syms, isLitLen);
+    td3.textContent = symbolsWithHints(syms, mode);
     tr.append(td1,td2,td3); tbl.appendChild(tr);
   });
   wrap.appendChild(tbl);
@@ -352,7 +408,8 @@ function makeCodeGrid(
   presentMask: boolean[],
   showTextMask: boolean[],
   titleBuilder: (i:number)=>string,
-  onClick: (i:number)=>void
+  onEnter: (i:number)=>void,
+  onLeave: ()=>void
 ) {
   const wrap = document.createElement("div");
   const head = document.createElement("div");
@@ -366,6 +423,7 @@ function makeCodeGrid(
   for (let i = 0; i < 128; i++) {
     const cell = document.createElement("div");
     cell.className = "codecell";
+    cell.dataset.lit = String(i);
     const present = presentMask[i];
     const showChar = showTextMask[i];
     const v = values[i];
@@ -380,22 +438,64 @@ function makeCodeGrid(
     // 自前ツールチップ
     cell.addEventListener("mouseenter", (ev:any)=>{
       const e = ev as MouseEvent;
+      onEnter(i);
       tooltip.show(e.clientX, e.clientY, titleBuilder(i));
     });
     cell.addEventListener("mousemove", (ev:any)=>{
       const e = ev as MouseEvent;
       tooltip.move(e.clientX, e.clientY);
     });
-    cell.addEventListener("mouseleave", ()=>tooltip.hide());
-
-    // クリック：該当 LIT を点灯
-    cell.addEventListener("click", (ev)=>{
-      ev.stopPropagation();
-      onClick(i);
-    });
+    cell.addEventListener("mouseleave", ()=>{ tooltip.hide(); onLeave(); });
 
     grid.appendChild(cell);
   }
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function makeRangeGrid(
+  caption:string,
+  entries:{label:string,value:number,present:boolean,from:number,to:number,sym?:number,full?:string}[],
+  colorer:(v:number)=>string,
+  titleBuilder:(e:any)=>string,
+  onEnter:(e:any)=>void,
+  onLeave:()=>void,
+  type:'len'|'dist'
+) {
+  const wrap=document.createElement("div");
+  const head=document.createElement("div");
+  head.textContent=caption;
+  (head.style as any).color="#9db1d0";
+  (head.style as any).margin="8px 0 6px";
+  wrap.appendChild(head);
+  const cols=Math.max(1, Math.ceil(entries.length/2));
+  const grid=document.createElement("div");
+  grid.className="codegrid";
+  (grid.style as any).gridTemplateColumns=`repeat(${cols}, 1fr)`;
+  entries.forEach(e=>{
+    const cell=document.createElement("div");
+    cell.className="codecell";
+    cell.dataset.type=type;
+    cell.dataset.from=String(e.from);
+    cell.dataset.to=String(e.to);
+    if(e.present && e.value>0){
+      (cell.style as any).background=colorer(e.value);
+    } else {
+      cell.classList.add("missing");
+    }
+    cell.textContent=e.label;
+    cell.addEventListener("mouseenter", (ev:any)=>{
+      const m=ev as MouseEvent;
+      onEnter(e);
+      tooltip.show(m.clientX,m.clientY,titleBuilder(e));
+    });
+    cell.addEventListener("mousemove", (ev:any)=>{
+      const m=ev as MouseEvent;
+      tooltip.move(m.clientX,m.clientY);
+    });
+    cell.addEventListener("mouseleave",()=>{ tooltip.hide(); onLeave(); });
+    grid.appendChild(cell);
+  });
   wrap.appendChild(grid);
   return wrap;
 }
@@ -466,50 +566,146 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
     note.textContent = `tokens ${s.tokens} (lit ${s.lit} / match ${s.match} / raw ${s.raw}), out ${s.outBytes} bytes`;
     card.appendChild(note);
 
-    // 0..127 ヒートマップ（bit長 / count）— テーブルより上
+    // 各種ヒートマップ（bit長 / usage）
     if (s.type !== 'RAW' && base.trees.litLenCodeLengths) {
       const bitlens = bitlenFor0to127(base.trees.litLenCodeLengths);
       const presentMask = bitlens.map(bl => bl > 0);
       const showTextMask = Array.from({length:128}, (_,i)=> i>=0x20 && i<=0x7e);
       const counts = countLitsForBlock(tokens, s.index);
-      const titleBuilder = (i:number)=> {
-        const ch = (i>=0x20 && i<=0x7e) ? ` ('${String.fromCharCode(i)}')` : "";
-        const bl = bitlens[i] || 0;
-        const ct = counts[i] || 0;
-        const blTxt = bl ? `${bl}b` : "—";
-        const ctTxt = String(ct);
-        return `code ${i}${ch}\nbit長: ${blTxt}\n使用回数: ${ctTxt}`;
-      };
-      const onClick = (i:number)=> {
-        lockLitByCode(vizContainer, i, s.index);
-      };
+        const titleBuilderLit = (i:number)=> {
+          const ch = (i>=0x20 && i<=0x7e) ? ` ('${String.fromCharCode(i)}')` : "";
+          const bl = bitlens[i] || 0;
+          const ct = counts[i] || 0;
+          const blTxt = bl ? `${bl}b` : "—";
+          const ctTxt = String(ct);
+          return `code: ${i}${ch}\nbit長: ${blTxt}\n使用回数: ${ctTxt}`;
+        };
+        const onEnterLit = (i:number)=>{
+          highlightLitByCode(vizContainer,i,s.index);
+        };
+        const onLeave = ()=>{ clearHighlights(vizContainer); };
+        const litBitsGrid = makeCodeGrid(
+          "Literal 0–127 : bit-length heatmap（緑=短, 赤=長）",
+          bitlens,
+          (v)=>litBgFor(v || 1, maxLitBits),
+          presentMask,
+          showTextMask,
+          titleBuilderLit,
+          onEnterLit,
+          onLeave
+        );
+        const litCountGrid = makeCodeGrid(
+          "Literal 0–127 : usage count heatmap（小=赤, 大=緑）",
+          counts,
+          (v)=>countBgFor(v, Math.max(1, globalMaxCount)),
+          counts.map(c => c>0),
+          showTextMask,
+          titleBuilderLit,
+          onEnterLit,
+          onLeave
+        );
 
-      const gridBits = makeCodeGrid(
-        "Literal 0–127 : bit-length heatmap（緑=短, 赤=長）",
-        bitlens,
-        (v)=>litBgFor(v || 1, maxLitBits),
-        presentMask,
-        showTextMask,
-        titleBuilder,
-        onClick
-      );
-      card.appendChild(gridBits);
+      // Length ranges
+        const matches = tokens.filter(t=>t.blockIndex===s.index && t.type==='match');
+        const lenEntriesAll:any[]=[];
+        let maxLenIdx=-1;
+        for(let idx=0; idx<=28; idx++){
+          const sym=257+idx;
+          let from:number, to:number;
+          if(sym===285){ from=258; to=258; }
+          else { from=LEN_BASE[idx]; const extra=LEN_EXTRA[idx]; to=from+((1<<extra)-1); }
+          const full=from===to?`${from}`:`${from}-${to}`;
+          const label=from===to?`${from}`:(from>=100?`${from}-`:`${from}-${to}`);
+          const bitlen=base.trees.litLenCodeLengths?(base.trees.litLenCodeLengths[sym]|0):0;
+          const count=matches.filter(m=>m.length>=from && m.length<=to).length;
+          if(bitlen>0 || count>0) maxLenIdx=idx;
+          lenEntriesAll.push({sym,label,full,bitlen,count,present:bitlen>0,from,to});
+        }
+        const lenEntries=lenEntriesAll.slice(0,maxLenIdx+1);
+        const lenBitEntries=lenEntries.map(e=>({...e,value:e.bitlen}));
+        const lenCountEntries=lenEntries.map(e=>({...e,value:e.count,present:e.present}));
+        const maxLenBits=Math.max(1,...lenEntries.filter(e=>e.present).map(e=>e.bitlen));
+        const maxLenCount=Math.max(1,...lenEntries.filter(e=>e.count>0).map(e=>e.count));
+        const titleBuilderLen=(e:any)=>{
+          const blTxt=e.bitlen?`${e.bitlen}b`:'—';
+          return `code: ${e.sym}(${e.full})\nbit長: ${blTxt}\n使用回数: ${e.count}`;
+        };
+        const lenBitsGrid=makeRangeGrid(
+          "Len : bit-length heatmap（緑=短, 赤=長）",
+          lenBitEntries,
+          (v)=>litBgFor(v||1,maxLenBits),
+          titleBuilderLen,
+          (e:any)=>highlightLengthRange(vizContainer,e.from,e.to,s.index),
+          onLeave,
+          'len'
+        );
+        const lenCountGrid=makeRangeGrid(
+          "Len : usage count heatmap（小=赤, 大=緑）",
+          lenCountEntries,
+          (v)=>countBgFor(v,maxLenCount),
+          titleBuilderLen,
+          (e:any)=>highlightLengthRange(vizContainer,e.from,e.to,s.index),
+          onLeave,
+          'len'
+        );
 
-      const gridCounts = makeCodeGrid(
-        "Literal 0–127 : usage count heatmap（小=赤, 大=緑）",
-        counts,
-        (v)=>countBgFor(v, Math.max(1, globalMaxCount)),
-        counts.map(c => c>0),
-        showTextMask,
-        titleBuilder,
-        onClick
-      );
-      card.appendChild(gridCounts);
+      // Distance ranges
+        const distEntriesAll:any[]=[];
+        let maxDistIdx=-1;
+        DIST_BASE.forEach((baseVal,sym)=>{
+          const extra=DIST_EXTRA[sym];
+          const from=baseVal; const to=baseVal+((1<<extra)-1);
+          const full=from===to?`${from}`:`${from}-${to}`;
+          const label=from===to?`${from}`:(from>=100?`${from}-`:`${from}-${to}`);
+          const bitlen=base.trees.distCodeLengths?(base.trees.distCodeLengths[sym]|0):0;
+          const count=matches.filter(m=>m.distance>=from && m.distance<=to).length;
+          if(bitlen>0 || count>0) maxDistIdx=sym;
+          distEntriesAll.push({sym,label,full,bitlen,count,present:bitlen>0,from,to});
+        });
+        const distEntries=distEntriesAll.slice(0,maxDistIdx+1);
+        const distBitEntries=distEntries.map(e=>({...e,value:e.bitlen}));
+        const distCountEntries=distEntries.map(e=>({...e,value:e.count,present:e.present}));
+        const maxDistBits=Math.max(1,...distEntries.filter(e=>e.present).map(e=>e.bitlen));
+        const maxDistCount=Math.max(1,...distEntries.filter(e=>e.count>0).map(e=>e.count));
+        const titleBuilderDist=(e:any)=>{
+          const blTxt=e.bitlen?`${e.bitlen}b`:'—';
+          return `code: ${e.sym}(${e.full})\nbit長: ${blTxt}\n使用回数: ${e.count}`;
+        };
+        const distBitsGrid=makeRangeGrid(
+          "Dist : bit-length heatmap（緑=短, 赤=長）",
+          distBitEntries,
+          (v)=>litBgFor(v||1,maxDistBits),
+          titleBuilderDist,
+          (e:any)=>highlightDistanceRange(vizContainer,e.from,e.to,s.index),
+          onLeave,
+          'dist'
+        );
+        const distCountGrid=makeRangeGrid(
+          "Dist : usage count heatmap（小=赤, 大=緑）",
+          distCountEntries,
+          (v)=>countBgFor(v,maxDistCount),
+          titleBuilderDist,
+          (e:any)=>highlightDistanceRange(vizContainer,e.from,e.to,s.index),
+          onLeave,
+          'dist'
+        );
+
+      const bitsRow=document.createElement('div'); bitsRow.className='heatmap-row';
+      const countsRow=document.createElement('div'); countsRow.className='heatmap-row';
+      litBitsGrid.classList.add('hm-half');
+      lenBitsGrid.classList.add('hm-quarter');
+      distBitsGrid.classList.add('hm-quarter');
+      litCountGrid.classList.add('hm-half');
+      lenCountGrid.classList.add('hm-quarter');
+      distCountGrid.classList.add('hm-quarter');
+      bitsRow.append(litBitsGrid,lenBitsGrid,distBitsGrid);
+      countsRow.append(litCountGrid,lenCountGrid,distCountGrid);
+      card.append(bitsRow,countsRow);
     }
 
     // 長さ別シンボル表（ヒートマップの下）
-    if (base.trees.litLenCodeLengths) card.appendChild(makeLenTable(s.type==='FIXED'?'Lit/Len (fixed)':'Lit/Len', base.trees.litLenCodeLengths, true));
-    if (base.trees.distCodeLengths)   card.appendChild(makeLenTable(s.type==='FIXED'?'Dist (fixed)':'Dist',     base.trees.distCodeLengths, false));
+    if (base.trees.litLenCodeLengths) card.appendChild(makeLenTable(s.type==='FIXED'?'Lit/Len (fixed)':'Lit/Len', base.trees.litLenCodeLengths, 'litlen'));
+    if (base.trees.distCodeLengths)   card.appendChild(makeLenTable(s.type==='FIXED'?'Dist (fixed)':'Dist',     base.trees.distCodeLengths, 'dist'));
 
     sidebar.appendChild(card);
   }

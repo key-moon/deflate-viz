@@ -51,8 +51,9 @@
       .btn .text{font-size:12px}
       .sep{width:1px; height:22px; background:#243151; margin:0 2px}
       input[type="text"], textarea{
-        background:#0f1527; color:var(--ink); border:1px solid #243151; border-radius:8px; padding:8px; outline:none;
+        background:#0f1527; color:var(--ink); -webkit-text-fill-color:var(--ink); border:1px solid #243151; border-radius:8px; padding:8px; outline:none;
       }
+      #hex,#b64{color:var(--ink); -webkit-text-fill-color:var(--ink);}
       textarea{height:64px; resize:vertical}
 
       /* ドラッグ&ドロップ */
@@ -100,6 +101,11 @@
         tab-size:2; -moz-tab-size:2;
       }
       .codecell.missing{ color:#7a8aa0; background:transparent; }
+      .codecell.hit{ outline:2px solid var(--accent); outline-offset:-2px; }
+
+      .heatmap-row{display:flex; gap:8px; margin-top:6px}
+      .hm-half{flex:0 0 50%}
+      .hm-quarter{flex:0 0 25%}
 
       /* エディタ */
       #editorWrap{height:100%; display:flex; flex-direction:column;}
