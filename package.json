@@ -9,7 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "ace-builds": "1.43.2"
+    "monaco-editor": "^0.44.0",
+    "monaco-languageclient": "^0.17.1",
+    "vscode-ws-jsonrpc": "^1.1.0",
+    "reconnecting-websocket": "^4.4.0"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

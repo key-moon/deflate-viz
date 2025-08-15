@@ -1,7 +1,8 @@
 /* ============================== imports ============================== */
-import ace from "ace-builds/src-noconflict/ace";
-import "ace-builds/src-noconflict/mode-python";
-import "ace-builds/src-noconflict/theme-monokai";
+import * as monaco from "monaco-editor";
+import { MonacoLanguageClient, CloseAction, ErrorAction, createConnection } from "monaco-languageclient";
+import { toSocket, WebSocketMessageReader, WebSocketMessageWriter } from "vscode-ws-jsonrpc";
+import ReconnectingWebSocket from "reconnecting-websocket";
 
 import { parseDeflate } from "./parser";
 import { renderOutput, renderBlocks, lockClear, tooltip } from "./renderer";
@@ -24,27 +25,62 @@ const hexToBytes = (hex: string) => {
 const bytesToHex = (u8: Uint8Array) => [...u8].map((b) => b.toString(16).padStart(2, "0")).join(" ");
 const b64enc = (u8: Uint8Array) => { let s = ""; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
 const b64dec = (b64: string) => { const bin = atob((b64 || "").trim()); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };
-/* ============================== Ace Editor 初期化 ============================== */
-const editor = ace.edit("editor", {
-  mode: "ace/mode/python",
-  theme: "ace/theme/monokai",
-  fontSize: "15px",
-  showPrintMargin: false,
-  wrap: true,
-  useWorker: false
+/* ============================== Monaco Editor 初期化 ============================== */
+const editorElem = document.getElementById("editor") as HTMLElement;
+const initialValue = editorElem.textContent || "";
+editorElem.textContent = "";
+
+const editor = monaco.editor.create(editorElem, {
+  value: initialValue,
+  language: "python",
+  theme: "vs-dark",
+  fontSize: 15,
+  automaticLayout: true,
+  tabSize: 2,
+  insertSpaces: true
 });
-editor.session.setTabSize(2);
-editor.session.setUseSoftTabs(true);
 
 const fitEditor = () => {
   const wrap = document.getElementById("editorWrap")!;
   const h = wrap.clientHeight;
-  (document.getElementById("editor") as HTMLElement).style.height = Math.max(120, h - 4) + "px";
-  editor.resize();
+  editorElem.style.height = Math.max(120, h - 4) + "px";
+  editor.layout();
 };
 new ResizeObserver(fitEditor).observe(document.getElementById("editorWrap")!);
 window.addEventListener("resize", fitEditor);
 fitEditor();
+
+function createUrl(path: string) {
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${location.host}${path}`;
+}
+
+function connectLsp() {
+  const url = createUrl("/lsp");
+  const webSocket = new ReconnectingWebSocket(url);
+  webSocket.addEventListener("open", () => {
+    const socket = toSocket(webSocket as any);
+    const reader = new WebSocketMessageReader(socket);
+    const writer = new WebSocketMessageWriter(socket);
+    const connection = createConnection(reader, writer, {
+      error: () => ErrorAction.Continue,
+      closed: () => CloseAction.DoNotRestart
+    });
+    const languageClient = new MonacoLanguageClient({
+      name: "Python LSP",
+      clientOptions: {
+        documentSelector: ["python"]
+      },
+      connectionProvider: {
+        get: () => Promise.resolve(connection)
+      }
+    });
+    languageClient.start();
+    reader.onClose(() => languageClient.stop());
+  });
+}
+
+connectLsp();
 
 /* ============================== UI要素 ============================== */
 const elHex = $("hex") as HTMLTextAreaElement;
@@ -110,7 +146,7 @@ async function compressFromEditorAndVisualize() {
       lastCompressedB64 = compB64;
       if (editor.getValue() !== decoded) {
         isProgrammaticEditorUpdate = true;
-        editor.setValue(decoded, -1);
+        editor.getModel()?.setValue(decoded);
         isProgrammaticEditorUpdate = false;
       }
     }
@@ -124,7 +160,7 @@ async function compressFromEditorAndVisualize() {
 const debounceCompress = ()=>{ if (compressTimer) clearTimeout(compressTimer); compressTimer = window.setTimeout(compressFromEditorAndVisualize, 300); };
 
 /* エディタ変更/トグル変更/イテレーション変更で再圧縮 */
-(editor.session as any).on("change", ()=>{
+editor.onDidChangeModelContent(() => {
   if (isProgrammaticEditorUpdate) return;
   debounceCompress();
 });
@@ -158,7 +194,7 @@ function parseBytes(bytes: Uint8Array, fileName?: string){
 
   if (editor.getValue() !== decoded) {
     isProgrammaticEditorUpdate = true;
-    editor.setValue(decoded, -1);
+    editor.getModel()?.setValue(decoded);
     isProgrammaticEditorUpdate = false;
   }
 
@@ -261,7 +297,7 @@ $("btn-share")!.addEventListener("click", async ()=>{
     try{
       const text = decodeURIComponent(escape(atob(t)));
       isProgrammaticEditorUpdate = true;
-      editor.setValue(text, -1);
+      editor.getModel()?.setValue(text);
       isProgrammaticEditorUpdate = false;
       elIterVal.textContent = String(elIter.value || "10");
       updateCodeLenLabel(text.length);          // 先にコード長だけ表示
