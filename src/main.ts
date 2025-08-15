@@ -55,7 +55,9 @@ const elZlibNote = $("zlibNote") as HTMLDivElement;
 const outDiv = $("output") as HTMLDivElement;
 const errDiv = $("error") as HTMLSpanElement;
 const okDiv = $("success") as HTMLSpanElement;
-const paneIO = $("pane-io") as HTMLDivElement;
+const inputModal = $("inputModal") as HTMLDialogElement;
+const btnInput = $("btn-input") as HTMLButtonElement;
+const btnClose = $("btn-close") as HTMLButtonElement;
 const elIter = $("iter") as HTMLInputElement;
 const elIterVal = $("iterVal") as HTMLSpanElement;
 const elDeflateLen = $("deflateLen") as HTMLSpanElement;
@@ -126,43 +128,60 @@ const debounceCompress = ()=>{ if (compressTimer) clearTimeout(compressTimer); c
   if (isProgrammaticEditorUpdate) return;
   debounceCompress();
 });
-elRaw.addEventListener("change", debounceCompress);
+elRaw.addEventListener("change", ()=>{
+  debounceCompress();
+  try{
+    const bytes = elHex.value.trim() ? hexToBytes(elHex.value) : elB64.value.trim() ? b64dec(elB64.value) : null;
+    if (bytes) parseBytes(bytes);
+  }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
+});
 elIter.addEventListener("input", ()=>{
   elIterVal.textContent = String(elIter.value);
   debounceCompress();
 });
 
-/* ============================== 入力→解析（手動解析ボタン） ============================== */
-$("btn-parse")!.addEventListener("click", ()=>{
+/* ============================== 入力モーダル ============================== */
+btnInput.addEventListener("click", ()=> inputModal.showModal());
+btnClose.addEventListener("click", ()=> inputModal.close());
+
+function parseBytes(bytes: Uint8Array, fileName?: string){
+  const raw = elRaw.checked;
+  const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(bytes, raw);
+  const maxLitBits = renderOutput(outDiv, tokens, blocks);
+  renderBlocks(elBlocks, blocks, tokens, maxLitBits);
+  elZlibNote.textContent = zlib ? zlibNote : '';
+
+  const decoded = dec.decode(outputBytes);
+
+  updateDeflateLenLabel(bytes.length);
+  updateCodeLenLabel(decoded.length);
+
+  if (editor.getValue() !== decoded) {
+    isProgrammaticEditorUpdate = true;
+    editor.setValue(decoded, -1);
+    isProgrammaticEditorUpdate = false;
+  }
+
+  lastCompressedB64 = b64enc(bytes);
+  setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length} / deflate: ${bytes.length} bytes${fileName ? ` / ファイル: ${fileName}` : ''}`);
+}
+
+elHex.addEventListener("input", ()=>{
   clearMsgs();
   try{
-    const raw = elRaw.checked;
-    let bytes: Uint8Array | null = null;
-    if (elHex.value.trim()) bytes = hexToBytes(elHex.value);
-    else if (elB64.value.trim()) bytes = b64dec(elB64.value);
-    else throw new Error("入力が空です。16進かBase64を指定してください。");
-
-    const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(bytes, raw);
-    const maxLitBits = renderOutput(outDiv, tokens, blocks);
-    renderBlocks(elBlocks, blocks, tokens, maxLitBits);
-    elZlibNote.textContent = zlib ? zlibNote : '';
-
-    const decoded = dec.decode(outputBytes);
-    const nowB64 = b64enc(bytes);
-
-    // ラベル更新
-    updateDeflateLenLabel(bytes.length);
-    updateCodeLenLabel(decoded.length);
-
-    if (lastCompressedB64 !== nowB64) lastCompressedB64 = nowB64;
-
-    if (editor.getValue() !== decoded) {
-      isProgrammaticEditorUpdate = true;
-      editor.setValue(decoded, -1);
-      isProgrammaticEditorUpdate = false;
-    }
-
-    setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length} / deflate: ${bytes.length} bytes`);
+    if (!elHex.value.trim()) return;
+    const bytes = hexToBytes(elHex.value);
+    elB64.value = b64enc(bytes);
+    parseBytes(bytes);
+  }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
+});
+elB64.addEventListener("input", ()=>{
+  clearMsgs();
+  try{
+    if (!elB64.value.trim()) return;
+    const bytes = b64dec(elB64.value);
+    elHex.value = bytesToHex(bytes);
+    parseBytes(bytes);
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 });
 
@@ -171,18 +190,20 @@ $("btn-file")!.addEventListener("click", ()=> $("fileInput")!.click());
 $("fileInput")!.addEventListener("change", async (ev:any)=>{
   const f = ev.target.files && ev.target.files[0];
   if (!f) return;
+  if (!inputModal.open) inputModal.showModal();
   await handleFile(f);
   (ev.target as HTMLInputElement).value = "";
 });
 ["dragenter","dragover"].forEach(evName=>{
-  document.addEventListener(evName, (e)=>{ e.preventDefault(); paneIO.classList.add("drop"); });
+  document.addEventListener(evName, (e)=>{ e.preventDefault(); inputModal.classList.add("drop"); });
 });
 ["dragleave","drop"].forEach(evName=>{
-  document.addEventListener(evName, (e)=>{ e.preventDefault(); paneIO.classList.remove("drop"); });
+  document.addEventListener(evName, (e)=>{ e.preventDefault(); inputModal.classList.remove("drop"); });
 });
 document.addEventListener("drop", async (e: DragEvent)=>{
   const dt = e.dataTransfer; if (!dt) return;
   if (dt.files && dt.files.length>0) {
+    if (!inputModal.open) inputModal.showModal();
     await handleFile(dt.files[0]);
   }
 });
@@ -190,28 +211,9 @@ async function handleFile(f: File){
   clearMsgs();
   try{
     const buf = new Uint8Array(await f.arrayBuffer());
-    const raw = elRaw.checked;
     elHex.value = bytesToHex(buf);
     elB64.value = b64enc(buf);
-    const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(buf, raw);
-    const maxLitBits = renderOutput(outDiv, tokens, blocks);
-    renderBlocks(elBlocks, blocks, tokens, maxLitBits);
-    elZlibNote.textContent = zlib ? zlibNote : '';
-
-    const decoded = dec.decode(outputBytes);
-
-    // ラベル更新
-    updateDeflateLenLabel(buf.length);
-    updateCodeLenLabel(decoded.length);
-
-    if (editor.getValue() !== decoded) {
-      isProgrammaticEditorUpdate = true;
-      editor.setValue(decoded, -1);
-      isProgrammaticEditorUpdate = false;
-    }
-
-    lastCompressedB64 = b64enc(buf);
-    setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length} / deflate: ${buf.length} bytes / ファイル: ${f.name}`);
+    parseBytes(buf, f.name);
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 }
 
@@ -275,7 +277,7 @@ $("btn-share")!.addEventListener("click", async ()=>{
       elHex.value = bytesToHex(bytes);
       lastCompressedB64 = d;
       updateDeflateLenLabel(bytes.length);      // 先に deflate 長を表示
-      $("btn-parse")!.click();
+      parseBytes(bytes);
       return;
     }catch(e){ console.warn("deflate デコード失敗", e); }
   }

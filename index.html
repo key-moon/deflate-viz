@@ -24,6 +24,7 @@
       }
       header .title{display:flex; align-items:center; gap:10px}
       header h1{margin:0; font-size:16px; color:var(--accent); white-space:nowrap}
+      header .controls{display:flex; align-items:center; gap:8px}
       header .status{display:flex; align-items:center; gap:12px; min-width:240px; justify-content:flex-end}
       .small{font-size:12px} .muted{color:var(--muted)} .mono{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono"}
       .err{color:var(--bad); white-space:pre; max-width:45vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
@@ -33,14 +34,13 @@
       /* レイアウト */
       .stack{display:grid; grid-template-rows: auto 1fr; gap:8px; height:calc(100vh - 56px); padding:8px;}
       .row{display:grid; grid-template-columns: 1fr 1fr; gap:8px; min-height:0;}
+      #row-top{grid-template-columns:1fr;}
       .panel{background:var(--panel); border:1px solid #233353; border-radius:12px; overflow:hidden; min-height:0;}
       .panel h2{margin:0; font-size:13px; color:#cfe3ff}
       .panel .h2bar{display:flex; justify-content:space-between; align-items:center; padding:8px 12px;}
       .section{padding:10px 12px; border-top:1px solid rgba(255,255,255,.06)}
       .rowline{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
 
-      /* 入力ツールバー */
-      .toolbar{display:flex; gap:8px; align-items:center; padding:10px 12px; border-top:1px solid rgba(255,255,255,.06); flex-wrap:wrap}
       .btn{
         display:inline-flex; align-items:center; gap:6px;
         height:32px; padding:0 10px; border-radius:8px; border:1px solid #243151;
@@ -49,14 +49,16 @@
       .btn:hover{filter:brightness(1.08)}
       .btn svg{width:18px; height:18px; fill:#cfe3ff}
       .btn .text{font-size:12px}
-      .toolbar .sep{width:1px; height:22px; background:#243151; margin:0 2px}
+      .sep{width:1px; height:22px; background:#243151; margin:0 2px}
       input[type="text"], textarea{
         background:#0f1527; color:var(--ink); border:1px solid #243151; border-radius:8px; padding:8px; outline:none;
       }
       textarea{height:64px; resize:vertical}
 
       /* ドラッグ&ドロップ */
-      #pane-io.drop{outline:2px dashed var(--accent); outline-offset:-6px; box-shadow: inset 0 0 0 9999px rgba(90,200,250,.08);}
+      #inputModal.drop{outline:2px dashed var(--accent); outline-offset:-6px; box-shadow: inset 0 0 0 9999px rgba(90,200,250,.08);}
+      #inputModal{width:500px; max-width:90vw; padding:0;}
+      #inputModal::backdrop{background:rgba(0,0,0,.5);}
 
       /* ブロック情報（固定高スクロール） */
       #pane-blocks{height:var(--blocks-height); display:flex; flex-direction:column;}
@@ -189,54 +191,51 @@
       <div class="title">
         <h1>Deflate 可視化 + Zopfli圧縮（Vite/ESM）</h1>
       </div>
+      <div class="controls">
+        <button id="btn-input" class="btn" title="入力">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>
+          <span class="text">入力</span>
+        </button>
+        <span class="sep"></span>
+        <input id="rawMode" type="checkbox" checked />
+        <label for="rawMode" class="small">生DEFLATE</label>
+        <span class="sep"></span>
+        <button id="btn-share" class="btn" title="URLを共有">
+          <svg viewBox="0 0 24 24"><path d="M18 8a3 3 0 1 0-2.83-4H12v2h3.17A3 3 0 0 0 18 8zm-3 8H8a3 3 0 1 0 0 2h7v2l4-3-4-3v2zM12 10H8v2h4v2l4-3-4-3v2z"/></svg>
+          <span class="text">共有</span>
+        </button>
+      </div>
       <div class="status">
         <span id="error" class="err hidden"></span>
         <span id="success" class="success hidden"></span>
       </div>
     </header>
 
+    <dialog id="inputModal" class="panel">
+      <h2 class="h2bar"><span>入力</span></h2>
+      <div class="section">
+        <input id="fileInput" type="file" accept=".deflate,.zlib,.bin,.raw,*/*" style="display:none" />
+        <button id="btn-file" class="btn" title="ファイルを読み込む（クリック or ドラッグ＆ドロップ）">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>
+          <span class="text">読み込み / DD</span>
+        </button>
+      </div>
+      <div class="section">
+        <div class="rowline"><label class="small">16進入力（スペース/改行OK）</label></div>
+        <textarea id="hex" class="mono" placeholder=""></textarea>
+        <div class="rowline">
+          <label class="small">Base64</label>
+          <input id="b64" type="text" class="mono" placeholder="" />
+        </div>
+      </div>
+      <div class="section" style="text-align:right">
+        <button id="btn-close" class="btn"><span class="text">閉じる</span></button>
+      </div>
+    </dialog>
+
     <div class="stack">
       <!-- 上段 -->
       <div class="row" id="row-top">
-        <div class="panel" id="pane-io">
-          <h2 class="h2bar"><span>入力とオプション</span></h2>
-
-          <div class="toolbar" id="toolbar">
-            <button id="btn-parse" class="btn" title="この入力を解析">
-              <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 1 1-6.364 2.636L3 3v6h6L6.874 6.874A7 7 0 1 0 13 5V3z"/></svg>
-              <span class="text">解析</span>
-            </button>
-            <button id="btn-clear" class="btn" title="入力をクリア">
-              <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3V6zm2 4h14l-1.5 9h-11L5 10zm5-7h4l1 2H9l1-2z"/></svg>
-              <span class="text">クリア</span>
-            </button>
-            <span class="sep"></span>
-            <input id="fileInput" type="file" accept=".deflate,.zlib,.bin,.raw,*/*" style="display:none" />
-            <button id="btn-file" class="btn" title="ファイルを読み込む（クリック or ドラッグ＆ドロップ）">
-              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>
-              <span class="text">読み込み / DD</span>
-            </button>
-            <span class="sep"></span>
-            <input id="rawMode" type="checkbox" checked />
-            <label for="rawMode" class="small">生DEFLATE</label>
-            <span class="sep"></span>
-            <button id="btn-share" class="btn" title="URLを共有">
-              <svg viewBox="0 0 24 24"><path d="M18 8a3 3 0 1 0-2.83-4H12v2h3.17A3 3 0 0 0 18 8zm-3 8H8a3 3 0 1 0 0 2h7v2l4-3-4-3v2zM12 10H8v2h4v2l4-3-4-3v2z"/></svg>
-              <span class="text">共有</span>
-            </button>
-          </div>
-
-          <!-- 入力欄 -->
-          <div class="section">
-            <div class="rowline"><label class="small">16進入力（スペース/改行OK）</label></div>
-            <textarea id="hex" class="mono" placeholder=""></textarea>
-            <div class="rowline">
-              <label class="small">Base64</label>
-              <input id="b64" type="text" class="mono" placeholder="" />
-            </div>
-          </div>
-        </div>
-
         <div class="panel" id="pane-blocks">
           <h2 class="h2bar">
             <span>ブロック情報（要約 + 0–127 ヒートマップ + 長さ別シンボル表）</span>
