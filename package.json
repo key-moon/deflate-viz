@@ -1,18 +1,40 @@
 {
   "name": "deflate-viz",
+  "displayName": "Deflate Viz",
+  "publisher": "openai",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+  "engines": {
+    "vscode": "^1.90.0"
   },
-  "dependencies": {
-    "ace-builds": "1.43.2"
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:deflateViz.showPreview"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "build": "tsc -p ./"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "deflateViz.showPreview",
+        "title": "Show Deflate Visualization"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "deflateViz.showPreview",
+          "when": "deflateViz.hasPreview",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "devDependencies": {
-    "typescript": "^5.9.2",
-    "vite": "^6.3.5"
+    "@types/node": "^18.17.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.9.2"
   }
 }
