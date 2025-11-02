@@ -1,40 +1,38 @@
 # Deflate Visualizer
 
-DEFLATEアルゴリズムの圧縮・解凍過程を視覚的に確認するためのツールです。
+A tool to visually inspect the compression and decompression steps of the DEFLATE algorithm.
 
-## 機能
+## Features
 
-- テキストの圧縮と視覚化
-- 圧縮されたバイトストリームの解析
-- トークン・ブロック情報の詳細表示
+- Compress and visualize text
+- Analyze compressed byte streams
+- Show detailed token and block information
 
-## 開発環境
+### WASM bindings
+
+The WebAssembly bindings used for Gzip/Zopfli compression and decompression in this project are provided by the `wasm_gz` repository:
+
+- https://github.com/packurl/wasm_gz
+
+## Development environment
 
 - Node.js
 - Vite
 - TypeScript
 - Ace Editor
 
-## ローカル開発
+## Local development
 
 ```bash
-# 依存関係のインストール
+# Install dependencies
 pnpm install
 
-# 開発サーバーの起動
+# Start dev server
 pnpm dev
 
-# ビルド
+# Build
 pnpm build
 
-# ビルド結果のプレビュー
+# Preview build output
 pnpm preview
 ```
-
-## デプロイ
-
-このプロジェクトはGitHub Actionsを使用して、mainブランチへのプッシュ時に自動的にGitHub Pagesにデプロイされます。
-
-## ライセンス
-
-[ライセンス情報]

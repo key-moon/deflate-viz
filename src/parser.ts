@@ -17,7 +17,7 @@ export function adler32(u8: Uint8Array) {
 class BitReader {
   bytes: Uint8Array; bitPos: number;
   constructor(bytes: Uint8Array) { this.bytes = bytes; this.bitPos = 0; }
-  ensure(n: number) { if (this.bitPos + n > this.bytes.length * 8) throw new Error("ビット列が足りません（不正/切り詰め）"); }
+  ensure(n: number) { if (this.bitPos + n > this.bytes.length * 8) throw new Error("Insufficient bits in stream (truncated or invalid)"); }
   readBits(n: number) {
     this.ensure(n);
     let val = 0, shift = 0;
@@ -65,7 +65,7 @@ class HuffmanLSB {
       if (tbl) { const sym = (tbl as any)[accum]; if (sym !== undefined) { if (dbg) dbg.decodedAt = { start, used: len }; return { symbol: sym, bitsUsed: len }; } }
     }
     const pos = reader.tellBits();
-    throw new Error(`ハフマン木の不整合（不正な符号列） @bit=${pos - 1} depth>=${this.maxBits} (start=${start})`);
+    throw new Error(`Huffman tree mismatch (invalid code) @bit=${pos - 1} depth>=${this.maxBits} (start=${start})`);
   }
 }
 
@@ -81,8 +81,8 @@ function parseMaybeZlibHeader(bytes: Uint8Array) {
     const cm = cmf & 0x0f; const check = ((cmf << 8) + flg) % 31;
     if (cm === 8 && check === 0) {
       const fdict = (flg >>> 5) & 1; let pos = 2;
-      if (fdict) { if (bytes.length < 6) throw new Error("zlibヘッダFDICT指定だが不足"); pos += 4; }
-      if (bytes.length < pos + 6) throw new Error("zlibヘッダ以降が短すぎます");
+      if (fdict) { if (bytes.length < 6) throw new Error("zlib header indicates FDICT but input is too short"); pos += 4; }
+      if (bytes.length < pos + 6) throw new Error("zlib header and trailer are too short");
       return { isZlib: true, start: pos, adlerAt: bytes.length - 4, cmf, flg };
     }
   }
@@ -128,14 +128,14 @@ export function parseDeflate(allBytes: Uint8Array, isRaw = false) {
     const headerBitsUsed = reader.tellBits() - blockStartBits;
     const blockInfo: BlockInfo = { index:blockIndex, BFINAL, BTYPE, headerBitsUsed, dynamicHeaderBits:0, trees:{}, notes:[] };
 
-    if (BTYPE === 3) throw new Error(`BTYPE=3 (予約) は不正なストリームです @block=${blockIndex}`);
+  if (BTYPE === 3) throw new Error(`BTYPE=3 (reserved) is invalid stream @block=${blockIndex}`);
 
     if (BTYPE === 0) {
       const beforeAlign = reader.tellBits();
       const pad = (8 - (beforeAlign & 7)) & 7;
       reader.readByteAligned();
       const len = reader.readBits(16), nlen = reader.readBits(16);
-      if (((len ^ 0xffff) & 0xffff) !== nlen) throw new Error(`非圧縮ブロック LEN/NLEN 不一致 @block=${blockIndex}`);
+  if (((len ^ 0xffff) & 0xffff) !== nlen) throw new Error(`Uncompressed block LEN/NLEN mismatch @block=${blockIndex}`);
       const tStart = out.length;
       const buf = new Uint8Array(len);
       for (let i=0;i<len;i++){ reader.ensure(8); buf[i]=reader.readBits(8); out.push(buf[i]); }
@@ -174,14 +174,14 @@ export function parseDeflate(allBytes: Uint8Array, isRaw = false) {
         const sym=dec1.symbol;
         if (sym<=15){ lengths.push(sym); }
         else if (sym===16){
-          if (lengths.length===0) throw new Error(`コード長16の前に値が必要 @block=${blockIndex}`);
+          if (lengths.length===0) throw new Error(`REPEAT(16) code requires a previous length @block=${blockIndex}`);
           const repeat=reader.readBits(2)+3; const prev=lengths[lengths.length-1];
           for(let i=0;i<repeat;i++) lengths.push(prev);
         } else if (sym===17){
           const repeat=reader.readBits(3)+3; for(let i=0;i<repeat;i++) lengths.push(0);
         } else if (sym===18){
           const repeat=reader.readBits(7)+11; for(let i=0;i<repeat;i++) lengths.push(0);
-        } else throw new Error(`不正なコード長符号 sym=${sym} @block=${blockIndex}`);
+        } else throw new Error(`Invalid code length code sym=${sym} @block=${blockIndex}`);
       }
       const litLens=lengths.slice(0,HLIT);
       const distLens=lengths.slice(HLIT,HLIT+HDIST);
@@ -215,16 +215,16 @@ export function parseDeflate(allBytes: Uint8Array, isRaw = false) {
         if (blockInfo.BFINAL) { break outer; }
         blockIndex++; break;
       } else {
-        if (sym>285) throw new Error(`不正な長さ符号 sym=${sym} @block=${blockIndex}`);
+  if (sym>285) throw new Error(`Invalid length symbol sym=${sym} @block=${blockIndex}`);
         let length:number; let lenExtraBits=0; const lenCodeBits=dec2.bitsUsed;
         if (sym===285){ length=258; }
         else { const idx=sym-257; const base=LEN_BASE[idx]; const extra=LEN_EXTRA[idx]; const ext=extra?reader.readBits(extra):0; tokenBits+=extra; lenExtraBits=extra; length=base+ext; }
-        const ddbg:any={}; const ddec=dist.decode(reader, ddbg); const dsym=ddec.symbol; tokenBits+=ddec.bitsUsed; const distCodeBits=ddec.bitsUsed;
-        if (dsym>29) throw new Error(`不正な距離符号 dsym=${dsym} @block=${blockIndex}`);
+  const ddbg:any={}; const ddec=dist.decode(reader, ddbg); const dsym=ddec.symbol; tokenBits+=ddec.bitsUsed; const distCodeBits=ddec.bitsUsed;
+  if (dsym>29) throw new Error(`Invalid distance symbol dsym=${dsym} @block=${blockIndex}`);
         const dbase=DIST_BASE[dsym]; const dextra=DIST_EXTRA[dsym]; const dval=dextra?reader.readBits(dextra):0; tokenBits+=dextra; const distExtraBits=dextra;
         const distance=dbase+dval;
         const tStart=out.length;
-        for (let i=0;i<length;i++){ const src=out.length-distance; if (src<0) throw new Error(`距離が出力境界を超過 dist=${distance} @block=${blockIndex}`); out.push(out[src]); }
+  for (let i=0;i<length;i++){ const src=out.length-distance; if (src<0) throw new Error(`Distance exceeds output boundary dist=${distance} @block=${blockIndex}`); out.push(out[src]); }
         const seg=dec.decode(new Uint8Array(out.slice(tStart,tStart+length)));
         tokens.push({
           type:'match', text:seg, length, distance, bitsUsed:tokenBits,
@@ -245,7 +245,7 @@ export function parseDeflate(allBytes: Uint8Array, isRaw = false) {
     const adlerActual=adler32(outputBytes);
     zlibNote = (adlerExpected===adlerActual)
       ? `zlib Adler32 OK (0x${adlerActual.toString(16).padStart(8,'0')})`
-      : `zlib Adler32 不一致 expected=0x${adlerExpected.toString(16).padStart(8,'0')} actual=0x${adlerActual.toString(16).padStart(8,'0')}`;
+      : `zlib Adler32 mismatch expected=0x${adlerExpected.toString(16).padStart(8,'0')} actual=0x${adlerActual.toString(16).padStart(8,'0')}`;
   }
   return {tokens,blocks,outputBytes,zlib:!isRaw,zlibNote};
 }

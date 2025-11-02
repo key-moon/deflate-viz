@@ -16,7 +16,7 @@ const dec = new TextDecoder("utf-8", { fatal: false });
 const hexToBytes = (hex: string) => {
   const cleaned = (hex || "").replace(/[^0-9a-fA-F]/g, "");
   if (!cleaned) return new Uint8Array([]);
-  if (cleaned.length % 2) throw new Error("16進文字列の長さが奇数です");
+  if (cleaned.length % 2) throw new Error("Hex string length is odd");
   const out = new Uint8Array(cleaned.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(cleaned.substr(i * 2, 2), 16);
   return out;
@@ -24,7 +24,7 @@ const hexToBytes = (hex: string) => {
 const bytesToHex = (u8: Uint8Array) => [...u8].map((b) => b.toString(16).padStart(2, "0")).join(" ");
 const b64enc = (u8: Uint8Array) => { let s = ""; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
 const b64dec = (b64: string) => { const bin = atob((b64 || "").trim()); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };
-/* ============================== Ace Editor 初期化 ============================== */
+/* ============================== Ace Editor initialization ============================== */
 const editor = ace.edit("editor", {
   mode: "ace/mode/python",
   theme: "ace/theme/monokai",
@@ -46,7 +46,7 @@ new ResizeObserver(fitEditor).observe(document.getElementById("editorWrap")!);
 window.addEventListener("resize", fitEditor);
 fitEditor();
 
-/* ============================== UI要素 ============================== */
+/* ============================== UI elements ============================== */
 const elHex = $("hex") as HTMLTextAreaElement;
 const elB64 = $("b64") as HTMLInputElement;
 const elRaw = $("rawMode") as HTMLInputElement;
@@ -58,8 +58,6 @@ const okDiv = $("success") as HTMLSpanElement;
 const inputModal = $("inputModal") as HTMLDialogElement;
 const btnInput = $("btn-input") as HTMLButtonElement;
 const btnClose = $("btn-close") as HTMLButtonElement;
-const elIter = $("iter") as HTMLInputElement;
-const elIterVal = $("iterVal") as HTMLSpanElement;
 const elDeflateLen = $("deflateLen") as HTMLSpanElement;
 const elCodeLen = $("codeLen") as HTMLSpanElement;
 
@@ -67,33 +65,33 @@ const setErr = (m: string) => { errDiv.textContent = m; errDiv.classList.remove(
 const setOk  = (m: string) => { okDiv .textContent = m; okDiv .classList.remove("hidden"); errDiv.classList.add("hidden"); };
 const clearMsgs=()=>{ errDiv.classList.add("hidden"); errDiv.textContent=''; okDiv.classList.add("hidden"); okDiv.textContent=''; };
 
-/* ============================== エディタ同期（再帰抑止） ============================== */
+/* ============================== Editor sync (reentrancy guard) ============================== */
 let isProgrammaticEditorUpdate = false;
 let lastCompressedB64: string | null = null;
 
-/* ============================== ラベル更新ユーティリティ ============================== */
+/* ============================== Label update utilities ============================== */
 function updateDeflateLenLabel(n: number){ if (elDeflateLen) elDeflateLen.textContent = String(n); }
 function updateCodeLenLabel(n: number){ if (elCodeLen) elCodeLen.textContent = String(n); }
 
-/* ============================== 圧縮→可視化 ============================== */
+/* ============================== Compress -> Visualize ============================== */
 let compressTimer: number | null = null as any;
 async function compressFromEditorAndVisualize() {
-  if (isProgrammaticEditorUpdate) return; // プログラム更新中はスキップ
+  if (isProgrammaticEditorUpdate) return; // Skip during programmatic updates
   clearMsgs();
   try{
     const text = editor.getValue();
     const input = enc.encode(text);
-    const raw = elRaw.checked;
-    const iters = Math.max(1, Math.min(1000, parseInt(elIter.value || "10", 10) || 10));
+  const raw = elRaw.checked;
+  const iters = 10; // fixed iterations (slider removed)
 
-    const comp = await zopfliCompressWithWorker(input, raw, iters);
+  const comp = await zopfliCompressWithWorker(input, raw, iters);
     const compB64 = b64enc(comp);
 
-    // 入力欄に反映
+  // Update input fields
     elHex.value = bytesToHex(comp);
     elB64.value = compB64;
 
-    // 解析して可視化
+  // Parse and visualize
     const {tokens,blocks,outputBytes,zlib,zlibNote} = parseDeflate(comp, raw);
     const maxLitBits = renderOutput(outDiv, tokens, blocks);
     renderBlocks(elBlocks, blocks, tokens, maxLitBits);
@@ -101,11 +99,11 @@ async function compressFromEditorAndVisualize() {
 
     const decoded = dec.decode(outputBytes);
 
-    // ラベル更新
+    // Update labels
     updateDeflateLenLabel(comp.length);
     updateCodeLenLabel(decoded.length);
 
-    // 圧縮バイト列が変化した場合のみ、エディタを更新（再帰抑止）
+    // Only update the editor if compressed bytes changed (prevent recursion)
     if (lastCompressedB64 !== compB64) {
       lastCompressedB64 = compB64;
       if (editor.getValue() !== decoded) {
@@ -115,7 +113,7 @@ async function compressFromEditorAndVisualize() {
       }
     }
 
-    setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length} / deflate: ${comp.length} bytes`);
+    setOk(`Output length: ${outputBytes.length} bytes / Text length: ${decoded.length} chars / Tokens: ${tokens.length} / Blocks: ${blocks.length} / deflate: ${comp.length} bytes`);
   }catch(e:any){
     console.error(e);
     setErr(String(e && e.message ? e.message : e));
@@ -123,7 +121,7 @@ async function compressFromEditorAndVisualize() {
 }
 const debounceCompress = ()=>{ if (compressTimer) clearTimeout(compressTimer); compressTimer = window.setTimeout(compressFromEditorAndVisualize, 300); };
 
-/* エディタ変更/トグル変更/イテレーション変更で再圧縮 */
+/* Recompress on editor/toggle/iteration changes */
 (editor.session as any).on("change", ()=>{
   if (isProgrammaticEditorUpdate) return;
   debounceCompress();
@@ -135,12 +133,9 @@ elRaw.addEventListener("change", ()=>{
     if (bytes) parseBytes(bytes);
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 });
-elIter.addEventListener("input", ()=>{
-  elIterVal.textContent = String(elIter.value);
-  debounceCompress();
-});
+// iterations slider removed; use fixed iteration count
 
-/* ============================== 入力モーダル ============================== */
+/* ============================== Input modal ============================== */
 btnInput.addEventListener("click", ()=> inputModal.showModal());
 btnClose.addEventListener("click", ()=> inputModal.close());
 
@@ -163,7 +158,7 @@ function parseBytes(bytes: Uint8Array, fileName?: string){
   }
 
   lastCompressedB64 = b64enc(bytes);
-  setOk(`復号長: ${outputBytes.length} bytes / 文字列長: ${decoded.length} chars / トークン: ${tokens.length} / ブロック: ${blocks.length} / deflate: ${bytes.length} bytes${fileName ? ` / ファイル: ${fileName}` : ''}`);
+  setOk(`Output length: ${outputBytes.length} bytes / Text length: ${decoded.length} chars / Tokens: ${tokens.length} / Blocks: ${blocks.length} / deflate: ${bytes.length} bytes${fileName ? ` / File: ${fileName}` : ''}`);
 }
 
 elHex.addEventListener("input", ()=>{
@@ -185,7 +180,7 @@ elB64.addEventListener("input", ()=>{
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 });
 
-/* ============================== ファイル読み込み（クリック & ドラッグ＆ドロップ） ============================== */
+/* ============================== File loading (click & drag & drop) ============================== */
 $("btn-file")!.addEventListener("click", ()=> $("fileInput")!.click());
 $("fileInput")!.addEventListener("change", async (ev:any)=>{
   const f = ev.target.files && ev.target.files[0];
@@ -217,7 +212,7 @@ async function handleFile(f: File){
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 }
 
-/* ============================== 共有（URL生成） ============================== */
+/* ============================== Share (generate URL) ============================== */
 function currentURLWithParams(): string {
   const raw = elRaw.checked ? "1" : "0";
   const b64 = (elB64.value || "").trim();
@@ -235,40 +230,39 @@ $("btn-share")!.addEventListener("click", async ()=>{
   try{
     const url = currentURLWithParams();
     if ((navigator as any).share) {
-      await (navigator as any).share({ title:"Deflate可視化", url });
-      setOk("共有ダイアログを開きました");
+      await (navigator as any).share({ title: "Deflate Visualizer", url });
+      setOk("Opened share dialog");
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(url);
-      setOk("URLをクリップボードにコピーしました");
+      setOk("Copied URL to clipboard");
     } else {
       history.replaceState(null, "", url);
-      setOk("URLを更新しました");
+      setOk("Updated URL in address bar");
     }
   }catch(e:any){ console.error(e); setErr(String(e && e.message ? e.message : e)); }
 });
 
-/* ============================== URL復元（初期） ============================== */
+/* ============================== URL restore (initial) ============================== */
 (function restoreFromURL(){
   const q = new URLSearchParams(location.search);
-  // 既定 raw=1（指定があればそれを優先）
+  // default raw=1 (override if explicitly specified)
   const rawParam = q.get("raw");
   const raw = rawParam ? (rawParam === "1") : true;
   elRaw.checked = raw;
 
-  const t = q.get("text");   // 平文（UTF-8 Base64）
-  const d = q.get("deflate");// 圧縮（Base64）
+  const t = q.get("text");   // plaintext (UTF-8 Base64)
+  const d = q.get("deflate");// compressed (Base64)
   if (t){
     try{
       const text = decodeURIComponent(escape(atob(t)));
-      isProgrammaticEditorUpdate = true;
-      editor.setValue(text, -1);
-      isProgrammaticEditorUpdate = false;
-      elIterVal.textContent = String(elIter.value || "10");
-      updateCodeLenLabel(text.length);          // 先にコード長だけ表示
-      updateDeflateLenLabel(0);                 // deflate は圧縮完了後に更新
+  isProgrammaticEditorUpdate = true;
+  editor.setValue(text, -1);
+  isProgrammaticEditorUpdate = false;
+  updateCodeLenLabel(text.length);          // update code length label first
+  updateDeflateLenLabel(0);                 // deflate length updated after compression
       debounceCompress();
       return;
-    }catch(e){ console.warn("text デコード失敗", e); }
+  }catch(e){ console.warn("failed to decode 'text'", e); }
   }
   if (d){
     try{
@@ -276,16 +270,16 @@ $("btn-share")!.addEventListener("click", async ()=>{
       elB64.value = d;
       elHex.value = bytesToHex(bytes);
       lastCompressedB64 = d;
-      updateDeflateLenLabel(bytes.length);      // 先に deflate 長を表示
+  updateDeflateLenLabel(bytes.length);      // update deflate length label first
       parseBytes(bytes);
       return;
-    }catch(e){ console.warn("deflate デコード失敗", e); }
+  }catch(e){ console.warn("failed to decode 'deflate'", e); }
   }
-  elIterVal.textContent = String(elIter.value || "10");
+  // iterations slider removed
   debounceCompress();
 })();
 
-/* ============================== グローバル：クリックでロック解除 / ESCで解除 ============================== */
+/* ============================== Global: click to unlock / ESC to dismiss ============================== */
 document.addEventListener("click", ()=>{
   const out = $("output");
   lockClear(out);

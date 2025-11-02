@@ -3,7 +3,7 @@ import { LEN_BASE, LEN_EXTRA, DIST_BASE, DIST_EXTRA } from "./parser";
 
 const $ = (id: string) => document.getElementById(id)!;
 
-/* ============================== 可視化：LITグラデーション ============================== */
+/* ============================== Visualization: LIT gradient ============================== */
 const defaultBg = (i: number) => `hsl(${Math.floor((i*137.508)%360)}deg 65% 28% / .45)`;
 function getMaxLitBits(blocks: BlockInfo[]): number {
   let max = 0;
@@ -16,15 +16,15 @@ function getMaxLitBits(blocks: BlockInfo[]): number {
 function litBgFor(bitlen: number, maxBits: number) {
   const denom = Math.max(1, maxBits - 1);
   const t = Math.max(0, Math.min(1, (bitlen - 1) / denom));
-  const hue = 120 - 120 * t;                  // 緑(短)→赤(長)
-  const light = (bitlen % 2 === 0) ? 32 : 26; // 偶奇で明度差
+  const hue = 120 - 120 * t;                  // green(short) -> red(long)
+  const light = (bitlen % 2 === 0) ? 32 : 26; // slight lightness difference by parity
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
 function countBgFor(count: number, maxCount: number) {
   if (maxCount <= 0) return `hsl(0deg 0% 18% / .0)`;
   const denom = Math.max(1, maxCount - 1);
   const t = Math.max(0, Math.min(1, (count - 1) / denom));
-  const hue = 120 * t; // 0(赤) → 120(緑)
+  const hue = 120 * t; // 0(red) -> 120(green)
   const light = (count % 2 === 0) ? 32 : 26;
   return `hsl(${hue}deg 75% ${light}% / .55)`;
 }
@@ -58,7 +58,7 @@ function updateCountLegend(maxCount: number) {
   ($("countLegendMax") as HTMLSpanElement).textContent = String(maxCount);
 }
 
-/* ======== 参照元ハイライト & 同一トークン断片の同時強調 ======== */
+/* ======== Reference highlight & same-token fragment emphasis ======== */
 function rangesOverlap(a0: number, a1: number, b0: number, b1: number) {
   return Math.max(a0, b0) < Math.min(a1, b1);
 }
@@ -85,7 +85,7 @@ function applyHighlight(container: HTMLElement, refStart: number, refEnd: number
   }
 }
 
-/* ======== ハイライト（トークン／コードセル） ======== */
+/* ======== Highlighting (tokens / code cells) ======== */
 export function lockClear(container: HTMLElement) {
   clearHighlights(container);
 }
@@ -135,7 +135,7 @@ function highlightDistanceRange(container: HTMLElement, min: number, max: number
   highlightRangeCells('dist', min, max);
 }
 
-/* ============================== トークン描画 ============================== */
+/* ============================== Token rendering ============================== */
 export function renderOutput(container: HTMLElement, tokens: any[], blocks: BlockInfo[]): number {
   container.innerHTML = "";
   const maxLitBits = getMaxLitBits(blocks);
@@ -183,17 +183,17 @@ export function renderOutput(container: HTMLElement, tokens: any[], blocks: Bloc
         ruby.classList.add("raw");
       }
 
-      // 文字（rb）は1文字ずつ span（絶対位置 data-abs）
+  // Characters (rb) are individual spans with absolute position data-abs
       const rb = document.createElement("rb");
       for (let i = 0; i < p.length; i++) {
         const ch = document.createElement("span");
         ch.className = "ch";
         ch.dataset.abs = String(absStart + i);
-        ch.textContent = p[i]; // \t は CSS tab-size で見た目だけ広げる
+  ch.textContent = p[i]; // \t is visually widened only via CSS tab-size
         rb.appendChild(ch);
       }
 
-      // ルビ（下側）
+  // Ruby annotation (below)
       const rt = document.createElement("rt");
       const head = t.type === 'lit' ? 'LIT' : t.type === 'match' ? 'MATCH' : 'RAW';
       if (t.type === 'match') {
@@ -209,7 +209,7 @@ export function renderOutput(container: HTMLElement, tokens: any[], blocks: Bloc
       ruby.append(rb, rt);
       container.appendChild(ruby);
 
-      // ホバー：同一トークン断片 + 参照（MATCH）
+  // Hover: same-token fragment + reference (MATCH)
       ruby.addEventListener("mouseenter", (ev) => {
         clearHighlights(container);
         const me = ev.currentTarget as HTMLElement;
@@ -242,7 +242,7 @@ export function renderOutput(container: HTMLElement, tokens: any[], blocks: Bloc
   return maxLitBits;
 }
 
-/* ============================== レンジ表ユーティリティ ============================== */
+/* ============================== Range table utilities ============================== */
 function escAsciiChar(code: number): string {
   const ch = String.fromCharCode(code);
   if (ch === "\\") return "\\\\";
@@ -344,7 +344,7 @@ function makeLenTable(title: string, codeLengths?: number[], mode:'litlen'|'dist
   return wrap;
 }
 
-/* ============================== 0..127 可視マップ生成 ============================== */
+/* ============================== 0..127 visual map generation ============================== */
 function countLitsForBlock(tokens: any[], blockIndex: number): number[] {
   const cnt = new Array(128).fill(0);
   for (const t of tokens) {
@@ -362,7 +362,7 @@ function bitlenFor0to127(codeLengths?: number[]): number[] {
   return out;
 }
 
-/** カスタムツールチップ */
+/** Custom tooltip */
 export const tooltip = (() => {
   const el = document.createElement("div");
   el.id = "tt";
@@ -400,7 +400,7 @@ export const tooltip = (() => {
   return { show, move, hide };
 })();
 
-/** 0..127 グリッド（bit長／count） */
+/** 0..127 grid (bit-length / count) */
 function makeCodeGrid(
   caption: string,
   values: number[],
@@ -435,7 +435,7 @@ function makeCodeGrid(
     }
     if (showChar) cell.textContent = String.fromCharCode(i);
 
-    // 自前ツールチップ
+  // custom tooltip
     cell.addEventListener("mouseenter", (ev:any)=>{
       const e = ev as MouseEvent;
       onEnter(i);
@@ -500,7 +500,7 @@ function makeRangeGrid(
   return wrap;
 }
 
-/* ============================== ブロック側レンダリング ============================== */
+/* ============================== Block-side rendering ============================== */
 type BlockSummary = {
   index:number; type:string; final:boolean;
   headerBits:number; dynHeaderBits:number; padBits:number; lenNlenBits:number;
@@ -537,7 +537,7 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
   sidebar.innerHTML = "";
   const summary = summarizeBlocks(blocks, tokens);
 
-  // counts 凡例（全ブロック最大）
+  // counts legend (max across all blocks)
   let globalMaxCount = 0;
   for (const b of blocks) {
     const cnt = countLitsForBlock(tokens, b.index);
@@ -566,26 +566,26 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
     note.textContent = `tokens ${s.tokens} (lit ${s.lit} / match ${s.match} / raw ${s.raw}), out ${s.outBytes} bytes`;
     card.appendChild(note);
 
-    // 各種ヒートマップ（bit長 / usage）
+  // various heatmaps (bit-length / usage)
     if (s.type !== 'RAW' && base.trees.litLenCodeLengths) {
       const bitlens = bitlenFor0to127(base.trees.litLenCodeLengths);
       const presentMask = bitlens.map(bl => bl > 0);
       const showTextMask = Array.from({length:128}, (_,i)=> i>=0x20 && i<=0x7e);
       const counts = countLitsForBlock(tokens, s.index);
-        const titleBuilderLit = (i:number)=> {
+          const titleBuilderLit = (i:number)=> {
           const ch = (i>=0x20 && i<=0x7e) ? ` ('${String.fromCharCode(i)}')` : "";
           const bl = bitlens[i] || 0;
           const ct = counts[i] || 0;
           const blTxt = bl ? `${bl}b` : "—";
           const ctTxt = String(ct);
-          return `code: ${i}${ch}\nbit長: ${blTxt}\n使用回数: ${ctTxt}`;
+          return `code: ${i}${ch}\nbit-length: ${blTxt}\ncount: ${ctTxt}`;
         };
         const onEnterLit = (i:number)=>{
           highlightLitByCode(vizContainer,i,s.index);
         };
         const onLeave = ()=>{ clearHighlights(vizContainer); };
         const litBitsGrid = makeCodeGrid(
-          "Literal 0–127 : bit-length heatmap（緑=短, 赤=長）",
+          "Literal 0–127 : bit-length heatmap (green=short, red=long)",
           bitlens,
           (v)=>litBgFor(v || 1, maxLitBits),
           presentMask,
@@ -595,7 +595,7 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
           onLeave
         );
         const litCountGrid = makeCodeGrid(
-          "Literal 0–127 : usage count heatmap（小=赤, 大=緑）",
+          "Literal 0–127 : usage count heatmap (small=red, large=green)",
           counts,
           (v)=>countBgFor(v, Math.max(1, globalMaxCount)),
           counts.map(c => c>0),
@@ -628,10 +628,10 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
         const maxLenCount=Math.max(1,...lenEntries.filter(e=>e.count>0).map(e=>e.count));
         const titleBuilderLen=(e:any)=>{
           const blTxt=e.bitlen?`${e.bitlen}b`:'—';
-          return `code: ${e.sym}(${e.full})\nbit長: ${blTxt}\n使用回数: ${e.count}`;
+          return `code: ${e.sym}(${e.full})\nbit-length: ${blTxt}\ncount: ${e.count}`;
         };
         const lenBitsGrid=makeRangeGrid(
-          "Len : bit-length heatmap（緑=短, 赤=長）",
+          "Len : bit-length heatmap (green=short, red=long)",
           lenBitEntries,
           (v)=>litBgFor(v||1,maxLenBits),
           titleBuilderLen,
@@ -640,7 +640,7 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
           'len'
         );
         const lenCountGrid=makeRangeGrid(
-          "Len : usage count heatmap（小=赤, 大=緑）",
+          "Len : usage count heatmap (small=red, large=green)",
           lenCountEntries,
           (v)=>countBgFor(v,maxLenCount),
           titleBuilderLen,
@@ -669,10 +669,10 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
         const maxDistCount=Math.max(1,...distEntries.filter(e=>e.count>0).map(e=>e.count));
         const titleBuilderDist=(e:any)=>{
           const blTxt=e.bitlen?`${e.bitlen}b`:'—';
-          return `code: ${e.sym}(${e.full})\nbit長: ${blTxt}\n使用回数: ${e.count}`;
+          return `code: ${e.sym}(${e.full})\nbit-length: ${blTxt}\ncount: ${e.count}`;
         };
         const distBitsGrid=makeRangeGrid(
-          "Dist : bit-length heatmap（緑=短, 赤=長）",
+          "Dist : bit-length heatmap (green=short, red=long)",
           distBitEntries,
           (v)=>litBgFor(v||1,maxDistBits),
           titleBuilderDist,
@@ -681,7 +681,7 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
           'dist'
         );
         const distCountGrid=makeRangeGrid(
-          "Dist : usage count heatmap（小=赤, 大=緑）",
+          "Dist : usage count heatmap (small=red, large=green)",
           distCountEntries,
           (v)=>countBgFor(v,maxDistCount),
           titleBuilderDist,
@@ -703,7 +703,7 @@ export function renderBlocks(sidebar: HTMLElement, blocks: BlockInfo[], tokens: 
       card.append(bitsRow,countsRow);
     }
 
-    // 長さ別シンボル表（ヒートマップの下）
+  // symbol table by length (below heatmaps)
     if (base.trees.litLenCodeLengths) card.appendChild(makeLenTable(s.type==='FIXED'?'Lit/Len (fixed)':'Lit/Len', base.trees.litLenCodeLengths, 'litlen'));
     if (base.trees.distCodeLengths)   card.appendChild(makeLenTable(s.type==='FIXED'?'Dist (fixed)':'Dist',     base.trees.distCodeLengths, 'dist'));
 

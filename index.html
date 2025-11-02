@@ -1,20 +1,20 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Deflate 可視化 + Zopfli圧縮 (Vite)</title>
+  <title>Deflate Visualizer + WASM Zopfli Compression</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       :root{
         --bg:#0b1020; --panel:#121a2e; --ink:#e8f0ff; --muted:#9db1d0; --accent:#5ac8fa;
         --bad:#ff5e57; --ok:#32d74b; --chip:#223050;
         --blocks-height: 340px;
-        --refch:#5d1919; /* 参照中の文字色（指定値） */
+  --refch:#5d1919; /* reference character color (explicit value) */
       }
       *{box-sizing:border-box}
       body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji");}
 
-      /* ヘッダー：1行・固定高・右にメッセージ */
+  /* Header: single row, fixed height, right-aligned message */
       header{
         position:sticky; top:0; z-index:10;
         height:56px; min-height:56px; max-height:56px;
@@ -31,7 +31,7 @@
       .success{color:var(--ok); white-space:nowrap}
       .hidden{visibility:hidden}
 
-      /* レイアウト */
+  /* Layout */
       .stack{display:grid; grid-template-rows: auto 1fr; gap:8px; height:calc(100vh - 56px); padding:8px;}
       .row{display:grid; grid-template-columns: 1fr 1fr; gap:8px; min-height:0;}
       #row-top{grid-template-columns:1fr;}
@@ -47,7 +47,9 @@
         background:#0f1527; color:var(--ink); cursor:pointer; user-select:none;
       }
       .btn:hover{filter:brightness(1.08)}
-      .btn svg{width:18px; height:18px; fill:#cfe3ff}
+  .btn svg{width:18px; height:18px; fill:#cfe3ff}
+  /* Support external SVG images inside .btn (use filter to match light icon color) */
+  .btn img{width:18px; height:18px; display:block; object-fit:contain; filter:invert(1) brightness(1.2)}
       .btn .text{font-size:12px}
       .sep{width:1px; height:22px; background:#243151; margin:0 2px}
       input[type="text"], textarea{
@@ -56,12 +58,12 @@
       #hex,#b64{color:var(--ink); -webkit-text-fill-color:var(--ink);}
       textarea{height:64px; resize:vertical}
 
-      /* ドラッグ&ドロップ */
+  /* Drag & drop */
       #inputModal.drop{outline:2px dashed var(--accent); outline-offset:-6px; box-shadow: inset 0 0 0 9999px rgba(90,200,250,.08);}
       #inputModal{width:500px; max-width:90vw; padding:0;}
       #inputModal::backdrop{background:rgba(0,0,0,.5);}
 
-      /* ブロック情報（固定高スクロール） */
+  /* Block info (fixed height, scrollable) */
       #pane-blocks{height:var(--blocks-height); display:flex; flex-direction:column;}
       #blocksScroll{flex:1 1 auto; overflow:auto; padding:4px 12px 10px;}
       .blocks{display:flex; flex-direction:column; gap:8px;}
@@ -71,14 +73,14 @@
       .chip{background:#223050; border:1px solid #2b3c61; padding:2px 8px; border-radius:999px; color:#cfe3ff; font-size:12px}
       .muteline{color:#9db1d0; font-size:12px; margin-top:2px}
 
-      /* 長さごとのシンボル表 */
+  /* Symbol table by length */
       .len-table{width:100%; border-collapse:collapse; font-size:12px; margin-top:6px}
       .len-table th,.len-table td{border-bottom:1px solid #253757; padding:3px 4px; text-align:left; vertical-align:top}
       .len-table th{color:#9db1d0; position:sticky; top:0; background:#0f1527}
       .mono-small{font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Noto Sans Mono",Consolas,"Liberation Mono"; font-size:12px}
       .wrap{word-break:break-word; white-space:normal}
 
-      /* 0..127 ヒートマップ */
+  /* 0..127 heatmap */
       .codegrid{
         display:grid;
         grid-template-columns: repeat(64, 1fr);
@@ -107,45 +109,44 @@
       .hm-half{flex:0 0 50%}
       .hm-quarter{flex:0 0 25%}
 
-      /* エディタ */
+  /* Editor */
       #editorWrap{height:100%; display:flex; flex-direction:column;}
       #editor{width:100%; flex:1 1 auto; border-radius:12px; min-height:120px; tab-size:2; -moz-tab-size:2;}
 
-      /* 見出し右側の iterations スライダ */
+  /* Iterations slider on the right side of heading */
       #iterControls{display:flex; align-items:center; gap:8px;}
       #iterControls label{font-size:12px; color:#9db1d0}
       #iter{width:200px; height:4px;}
       #iterVal{min-width:2ch; display:inline-block}
 
-      /* 可視化（縦スクロールのみ、横禁止） */
+  /* Visualization (vertical scroll only, horizontal disabled) */
       #pane-viz{display:flex; flex-direction:column; min-height:0;}
       #vizHeader{padding:8px 12px 0;}
       #vizScroll{flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:10px 12px; min-height:0;}
       .viz{
-        white-space:pre-wrap;           /* 改行保持＋折り返し */
-        overflow-wrap:anywhere;         /* 横スクロール禁止 */
+  white-space:pre-wrap;           /* preserve line breaks + wrap */
+  overflow-wrap:anywhere;         /* prevent horizontal scrolling */
         word-break:break-word;
         max-width:100%;
-        tab-size:2; -moz-tab-size:2;   /* タブ幅=2（可視化側） */
+  tab-size:2; -moz-tab-size:2;   /* tab width = 2 (visualization side) */
         font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono","Noto Sans Mono",Consolas,"Liberation Mono";
       }
 
-      /* トークン（MATCH は縁取りのみ、色は #3349b8） */
+  /* Tokens (MATCH only has outline, color #3349b8) */
       ruby.tok{position:relative; display:inline-block; border-radius:6px; padding:0 .5px}
-      ruby.tok.lit{ /* JSで背景色を付与 */ }
-      ruby.tok.raw{ /* JSで背景色を付与 */ }
+  /* ruby.tok.lit and ruby.tok.raw backgrounds are applied dynamically via JS */
       ruby.tok.match{
-        background:transparent !important; /* 塗りなし */
-        border:1px solid #3349b8;       /* 縁取り */
+  background:transparent !important; /* no fill */
+  border:1px solid #3349b8;       /* outline */
         padding:0 .5px; border-radius:6px;
         box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
       }
-      /* 改行分断時の境界調整 */
+  /* Boundary adjustments when split across line breaks */
       ruby.tok.match.frag-mid{ border:none; border-radius:0; box-shadow:none; }
       ruby.tok.match.frag-start{ border-right:none; border-top-right-radius:0; border-bottom-right-radius:0; }
       ruby.tok.match.frag-end{ border-left:none; border-top-left-radius:0; border-bottom-left-radius:0; }
       ruby.tok.frag-mid{ border-radius:0; }
-      /* 同一トークン断片強調 & クリック固定 */
+  /* Highlight same token fragments & click-to-lock */
       ruby.tok.same-token{
         outline:1px solid rgba(90,200,250,.35);
         outline-offset:1px;
@@ -154,7 +155,7 @@
         box-shadow: inset 0 0 0 2px #3349b8, 0 0 0 2px rgba(51,73,184,.25);
         border-color:#5c71e0;
       }
-      /* 参照元ハイライト（文字単位） */
+  /* Reference highlight (per character) */
       .ch{white-space:pre;}
       .ch.refch{
         font-weight:700;
@@ -165,7 +166,7 @@
         box-shadow: inset 0 0 0 2px #3349b8, 0 0 0 2px rgba(51,73,184,.25);
         border-color:#5c71e0;
       }
-      /* ルビ（下側に出す） */
+  /* Ruby/tooltip (display below) */
       ruby.tok rt{
         position:absolute; left:0; bottom:-1.35em;
         font-size:10px; line-height:1; background:#0008; padding:2px 4px; border-radius:4px; color:#eff7ff;
@@ -175,7 +176,7 @@
       ruby.tok:hover rt{opacity:1; transform:translateY(0)}
       ruby.tok rb{white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; tab-size:2; -moz-tab-size:2;}
 
-      /* 凡例（min | bar | max の3カラム） */
+  /* Legend (min | bar | max three columns) */
       .legend{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
       .chip2{background:#223050; border:1px solid #2b3c61; padding:3px 8px; border-radius:999px; color:#9db1d0; font-size:12px}
       .legend-lit{
@@ -195,21 +196,26 @@
   <body>
     <header>
       <div class="title">
-        <h1>Deflate 可視化 + Zopfli圧縮（Vite/ESM）</h1>
+  <h1>Deflate Visualizer + WASM Zopfli Compression</h1>
       </div>
       <div class="controls">
-        <button id="btn-input" class="btn" title="入力">
+  <button id="btn-input" class="btn" title="Input">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>
-          <span class="text">入力</span>
+          <span class="text">Input</span>
         </button>
         <span class="sep"></span>
         <input id="rawMode" type="checkbox" checked />
-        <label for="rawMode" class="small">生DEFLATE</label>
+        <label for="rawMode" class="small">Raw DEFLATE</label>
         <span class="sep"></span>
-        <button id="btn-share" class="btn" title="URLを共有">
+  <button id="btn-share" class="btn" title="Share URL">
           <svg viewBox="0 0 24 24"><path d="M18 8a3 3 0 1 0-2.83-4H12v2h3.17A3 3 0 0 0 18 8zm-3 8H8a3 3 0 1 0 0 2h7v2l4-3-4-3v2zM12 10H8v2h4v2l4-3-4-3v2z"/></svg>
-          <span class="text">共有</span>
+          <span class="text">Share</span>
         </button>
+        <a id="btn-github" class="btn" href="https://github.com/key-moon/deflate-viz" title="View on GitHub" aria-label="Open project on GitHub" target="_blank" rel="noopener noreferrer">
+          <!-- external Octicons GitHub mark to avoid broken inline SVGs -->
+          <img src="https://unpkg.com/@primer/octicons@16.1.1/build/svg/mark-github-16.svg" alt="GitHub" />
+          <span class="text">GitHub</span>
+        </a>
       </div>
       <div class="status">
         <span id="error" class="err hidden"></span>
@@ -218,34 +224,34 @@
     </header>
 
     <dialog id="inputModal" class="panel">
-      <h2 class="h2bar"><span>入力</span></h2>
+  <h2 class="h2bar"><span>Input</span></h2>
       <div class="section">
         <input id="fileInput" type="file" accept=".deflate,.zlib,.bin,.raw,*/*" style="display:none" />
-        <button id="btn-file" class="btn" title="ファイルを読み込む（クリック or ドラッグ＆ドロップ）">
+  <button id="btn-file" class="btn" title="Load file (click or drag & drop)">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>
-          <span class="text">読み込み / DD</span>
+          <span class="text">Load / DD</span>
         </button>
       </div>
       <div class="section">
-        <div class="rowline"><label class="small">16進入力（スペース/改行OK）</label></div>
+  <div class="rowline"><label class="small">Hex input (spaces/newlines allowed)</label></div>
         <textarea id="hex" class="mono" placeholder=""></textarea>
         <div class="rowline">
           <label class="small">Base64</label>
           <input id="b64" type="text" class="mono" placeholder="" />
         </div>
       </div>
-      <div class="section" style="text-align:right">
-        <button id="btn-close" class="btn"><span class="text">閉じる</span></button>
+        <div class="section" style="text-align:right">
+        <button id="btn-close" class="btn"><span class="text">Close</span></button>
       </div>
     </dialog>
 
     <div class="stack">
-      <!-- 上段 -->
+      <!-- Upper section -->
       <div class="row" id="row-top">
         <div class="panel" id="pane-blocks">
           <h2 class="h2bar">
-            <span>ブロック情報（要約 + 0–127 ヒートマップ + 長さ別シンボル表）</span>
-            <div class="legend-lit" aria-label="使用回数スケール（小=赤, 大=緑）">
+            <span>Block info (summary + 0-127 heatmap + symbol table by length)</span>
+            <div class="legend-lit" aria-label="usage count scale (small=red, large=green)">
               <div class="scale small">count</div>
               <div class="bar" id="countLegendBar"></div>
               <div class="scale"><span id="countLegendMax" class="small">0</span></div>
@@ -256,19 +262,15 @@
         </div>
       </div>
 
-      <!-- 下段 -->
+  <!-- Lower section -->
       <div class="row" id="row-bottom">
         <div class="panel" id="pane-editor">
           <h2 class="h2bar">
             <span>
-              エディタ (Python, 変更で即Zopfli圧縮)
+              Editor (Python, changes trigger Zopfli compression)
               <span class="chip2 small mono inlineStat">code <span id="codeLen">0</span></span>
             </span>
-            <div id="iterControls" class="ctl">
-              <label for="iter">Zopfli iterations:</label>
-              <input id="iter" type="range" min="1" max="50" step="1" value="10" />
-              <span class="small mono" id="iterVal">10</span>
-            </div>
+            <!-- Zopfli iterations slider removed -->
           </h2>
           <div id="editorWrap">
             <div id="editor">def p(g):
@@ -293,14 +295,14 @@
         <div class="panel" id="pane-viz">
           <h2 class="h2bar">
             <span>
-              可視化（トークン彩色 & ルビ注釈）
+              Visualization
               <span class="chip2 small mono inlineStat">deflate <span id="deflateLen">0</span> B</span>
             </span>
           </h2>
           <div id="vizHeader">
             <div class="legend">
-              <span class="chip2 small">ホバー: 種別/パラメータ/bit長・参照先 / クリック: 固定ハイライト</span>
-              <div class="legend-lit" aria-label="LITビット長スケール（緑=短, 赤=長）">
+              <span class="chip2 small">Hover: type/params/bit-length & references</span>
+              <div class="legend-lit" aria-label="LIT bit-length scale (green=short, red=long)">
                 <div class="scale"><span id="litLegendMin">1b</span></div>
                 <div class="bar" id="litLegendBar" title="LIT token bit-length scale"></div>
                 <div class="scale"><span id="litLegendMax">9b</span></div>
@@ -314,7 +316,7 @@
       </div>
     </div>
 
-    <!-- Viteエントリ -->
+  <!-- Vite entry -->
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

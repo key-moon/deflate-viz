@@ -12,22 +12,22 @@ export async function getZopfli(): Promise<ZopfliFn> {
     }
     const mod: any = await import(`${base}gzip_zopfli_worker.mjs`);
     if (!mod || typeof mod.zopfli !== "function") {
-      throw new Error("zopfli_worker.mjs の読み込みに失敗（zopfliが見つかりません）");
+      throw new Error("Failed to load zopfli_worker.mjs (zopfli not found)");
     }
     _zopfliFn = mod.zopfli as ZopfliFn;
     return _zopfliFn!;
   } catch (e: any) {
-    console.error("zopfli_worker.mjs のロードに失敗:", e);
-    throw new Error(`zopfli_worker.mjs の読み込みに失敗: ${e.message || e}`);
+    console.error("Failed to load zopfli_worker.mjs:", e);
+    throw new Error(`Failed to import zopfli_worker.mjs: ${e.message || e}`);
   }
 }
 
 function extractDeflateFromGzip(gz: Uint8Array): Uint8Array {
-  if (gz.length < 18) throw new Error("gzipが短すぎます");
-  if (gz[0] !== 0x1f || gz[1] !== 0x8b || gz[2] !== 8) throw new Error("gzipヘッダ不正または非DEFLATE");
+  if (gz.length < 18) throw new Error("gzip is too short");
+  if (gz[0] !== 0x1f || gz[1] !== 0x8b || gz[2] !== 8) throw new Error("Invalid gzip header or not DEFLATE");
   const FLG = gz[3];
   let off = 10; // ID1 ID2 CM FLG MTIME(4) XFL OS
-  const need = (n: number) => { if (off + n > gz.length) throw new Error("gzipヘッダ切り詰め"); };
+  const need = (n: number) => { if (off + n > gz.length) throw new Error("Truncated gzip header"); };
   if (FLG & 0x04) {
     need(2); const xlen = gz[off] | (gz[off+1] << 8); off += 2; need(xlen); off += xlen;
   }
@@ -40,7 +40,7 @@ function extractDeflateFromGzip(gz: Uint8Array): Uint8Array {
   if (FLG & 0x02) {
     need(2); off += 2;
   }
-  if (off > gz.length - 8) throw new Error("gzipボディが存在しません");
+  if (off > gz.length - 8) throw new Error("No gzip body found");
   return gz.subarray(off, gz.length - 8);
 }
 
@@ -56,7 +56,7 @@ function wrapZlib(deflateRaw: Uint8Array, adler: number): Uint8Array {
 
 export async function zopfliCompressWithWorker(input: Uint8Array, raw: boolean, numIterations = 10): Promise<Uint8Array> {
   const zopfli = await getZopfli();
-  const gz = await zopfli(input, numIterations); // Worker は GZIP を返す
+  const gz = await zopfli(input, numIterations); // Worker returns GZIP
   const deflateRaw = extractDeflateFromGzip(gz);
   if (raw) return deflateRaw;
   const ad = adler32(input);
