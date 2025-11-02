@@ -2,6 +2,8 @@
 
 A tool to visually inspect the compression and decompression steps of the DEFLATE algorithm.
 
+![Thumbnail](img/deflate-viz.png)
+
 ## Features
 
 - Compress and visualize text
